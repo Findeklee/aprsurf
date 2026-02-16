@@ -1,0 +1,15 @@
+# Beispiel-Konfigurationsdatei für ham-bbs
+# Kommentare beginnen mit # oder ;
+
+# Pfad zur SQLite-Datenbank
+db_path = /var/lib/ham-bbs.db
+
+# APRS/Direwolf Host und Port
+aprs_host = 127.0.0.1
+aprs_port = 8000
+
+# TCP/Telnet Port
+listen_port = 2323
+
+# Name des BBS
+bbs_name = Mein BBS
