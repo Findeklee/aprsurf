@@ -23,10 +23,16 @@ bool db_add_message(db_handle_t *db, const char *callsign, const char *msg, cons
 bool db_add_lastlog(db_handle_t *db, const char *callsign);
 
 // Callback for iterating messages (for wall display etc.)
-typedef int (*db_message_callback)(const char *callsign, const char *msg, const char *timestamp, const char *source, void *userdata);
+typedef int (*db_message_callback)(const char *callsign, const char *msg, const char *timestamp, const char *source, void *userdata, char *src_call);
 
 // Iterate all messages (most recent first)
 // Returns number of messages, or -1 on error
-int db_get_messages(db_handle_t *db, db_message_callback cb, void *userdata);
+// char *src_call: who requested the messages? ignore for telnet users, only needed for APRS
+int db_get_messages(db_handle_t *db, db_message_callback cb, void *userdata, int limit, char *src_call);
+
+// Add a bulletin to the database (returns true on success)
+bool db_add_bulletin(db_handle_t *db, const char *dest_call, const char *from_call, const char *content);    
+
+int db_get_bulletins(db_handle_t *db, db_message_callback cb, void *userdata);
 
 #endif // DB_H

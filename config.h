@@ -11,6 +11,7 @@ typedef struct {
     int  listen_port;      // TCP/Telnet Port
     char bbs_name[64];     // Name des BBS
     char sysop_callsign[10]; // Rufzeichen des Sysops
+    char bbs_callsign[10]; // Rufzeichen der BBS (z.B. "DN9RZ-10")
     char grid_locator[10]; // Grid Locator, z.B. "JO31EG"
 } Config;
 

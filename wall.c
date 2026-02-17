@@ -9,7 +9,8 @@
 #define WALL_MAX_SHOW 10
 
 // Callback für db_get_messages: Zeigt die letzten n Nachrichten
-static int print_wall_message(const char *callsign, const char *msg, const char *timestamp, const char *source, void *userdata) {
+static int print_wall_message(const char *callsign, const char *msg, const char *timestamp, const char *source, void *userdata, char *src_call) {
+    (void)src_call; // Unused parameter
     int *counter = (int*)userdata;
     if (*counter >= WALL_MAX_SHOW) return 1;
     printf("\033[0;34m%.16s|%s|\033[31m%7s\033[34m  |\n`-> \033[0m%.60s\n", timestamp, source, callsign, msg);
@@ -25,7 +26,7 @@ void handle_wall(Session *s, char *input) {
         printf("\033[0m\033[1;34m----[\033[33mMessage Wall\033[34m]--------------------------------------------------------------\n");
         int shown = 0;
         if (g_db) {
-            db_get_messages(g_db, print_wall_message, &shown);
+            db_get_messages(g_db, print_wall_message, &shown, WALL_MAX_SHOW, NULL);
         }
         if (shown == 0) printf("(No messages on the wall yet)\n");
         printf("\033[0m\033[1;34m--------------------------------------------------------------------------------");

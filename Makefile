@@ -4,7 +4,7 @@ all: ham-bbs lastlog-viewer aprs-daemon
 
 ham-bbs: $(OBJS)
 
-OBJS=main.o session.o menu.o wall.o state.o termutil.o bbsinfo.o userinfo.o login.o config.o db.o aprs.o
+OBJS=main.o session.o menu.o wall.o state.o termutil.o bulletins.o bbsinfo.o userinfo.o login.o config.o db.o aprs.o 
 aprs.o: aprs.c aprs.h
 config.o: config.c config.h
 
@@ -15,10 +15,11 @@ db.o: db.c db.h
 login.o: login.c login.h state.h
 
 bbsinfo.o: bbsinfo.c bbsinfo.h state.h
+bulletins.o: bulletins.c bulletins.h state.h
 wall.o: wall.c wall.h state.h termutil.h
 
 aprs-daemon: aprs-daemon.c
-	$(CC) $(CFLAGS) -o $@ config.o $< -lsqlite3
+	$(CC) $(CFLAGS) -o $@ config.o db.o $< -lsqlite3
 
 help:
 	@echo "Verfügbare Befehle:"

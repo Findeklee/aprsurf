@@ -3,6 +3,7 @@
 #include "bbsinfo.h"
 #include "userinfo.h"
 #include "config.h"
+#include "bulletins.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -32,6 +33,9 @@ void handle_menu(Session *s, char *input) {
     }
     if (strncmp(input, "m", 1) == 0 && strlen(input) == 1) {
         switch_to_wall(s);
+    } else if (strncmp(input, "r", 1) == 0 && strlen(input) == 1) {
+        s->handler = handle_bulletins;
+        s->state_changed = 1;
     } else if (strncmp(input, "b", 1) == 0 && strlen(input) == 1) {
         s->handler = handle_bbsinfo;
         s->state_changed = 1;

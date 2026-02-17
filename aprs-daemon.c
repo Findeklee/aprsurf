@@ -12,13 +12,15 @@
 #include <sys/select.h>
 
 #include "config.h"
+#include "db.h"
 
 #define SERVER_IP "192.168.178.39"
 #define KISS_PORT 8001
 #define BUF_SIZE 1024
 
 
-const char *my_callsign = "DN9RZ-10";
+// const char *my_callsign = "DN9RZ-10";
+
 
 // Neue Struktur für ausgehende Nachrichten in der Queue
 typedef struct OutgoingMessage {
@@ -34,6 +36,9 @@ typedef struct OutgoingMessage {
 OutgoingMessage *message_queue = NULL;
 
 time_t last_queue_process = 0;
+
+// Globaler DB-Handle
+db_handle_t *g_db = NULL;
 
 /**
  * Kodiert ein Rufzeichen im AX.25-Format.
@@ -140,7 +145,7 @@ void send_aprs_message(int sock, const char *dest_call, const char *text, const 
     //for (int i = 0; i < 6; i++) frame[p++] = (source[i] << 1);
     // Das letzte Byte der Adressliste bekommt das End-Bit 0x01
     //frame[p++] = (my_ssid << 1) | 0x61; 
-    encode_ax25_call(&frame[p], my_callsign, 0); // Absender
+    encode_ax25_call(&frame[p], g_config.bbs_callsign, 0); // Absender
     p += 7;
     
     // 4. PFAD (WIDE1-1, WIDE2-1)
@@ -199,7 +204,7 @@ void send_aprs_beacon(int sock, const char *dest_call, const char *text) {
     //for (int i = 0; i < 6; i++) frame[p++] = (source[i] << 1);
     // Das letzte Byte der Adressliste bekommt das End-Bit 0x01
     //frame[p++] = (my_ssid << 1) | 0x61; 
-    encode_ax25_call(&frame[p], my_callsign, 0); // Absender
+    encode_ax25_call(&frame[p], g_config.bbs_callsign, 0); // Absender
     p += 7;
     
     // 4. PFAD (WIDE1-1, WIDE2-1)
@@ -284,7 +289,7 @@ void send_aprs_ack_with_path(int sock, const char *sender_call, const char *msg_
     //frame[p++] = (my_ssid << 1) | 0x61; 
 
     //encode_ax25_call(&frame[p], "DN9RZ-10", 0); // Absender
-    encode_ax25_call(&frame[p], my_callsign, 0); // Absender
+    encode_ax25_call(&frame[p], g_config.bbs_callsign, 0); // Absender
     p += 7;
 
     // 4. PFAD 1: WIDE1-1
@@ -345,7 +350,7 @@ void send_aprs_ack(int sock, const char *sender_call, const char *msg_id) {
     // Das letzte Byte der Adressliste bekommt das End-Bit 0x01
     //frame[p++] = (my_ssid << 1) | 0x61; 
 
-    encode_ax25_call(&frame[p], my_callsign, 1); // Absender
+    encode_ax25_call(&frame[p], g_config.bbs_callsign, 1); // Absender
     p += 7;
 
     // 4. AX.25 Control & PID
@@ -423,7 +428,7 @@ unsigned char *find_payload(unsigned char *ax25_start, int total_len) {
 }
 
 // Ersetze die gesamte save_message_to_bbs Funktion mit diesem korrigierten Code:
-
+/*
 void save_message_to_bbs(const char *from_call, const char *raw_payload) {
     sqlite3 *db;
     char *err_msg = 0;
@@ -463,8 +468,9 @@ void save_message_to_bbs(const char *from_call, const char *raw_payload) {
 
     sqlite3_free(sql);
     sqlite3_close(db);
+    
 }
-
+*/
 
 // Funktion: Neue Nachricht zur Queue hinzufügen
 void add_to_queue(const char *dest_call, const char *text) {
@@ -547,8 +553,18 @@ void process_queue(int sock) {
     }
 }
 
-void handle_wall_command(const char *src_call) {
-    sqlite3 *db;
+int queue_wall_messages(const char *callsign, const char *msg, const char *timestamp, const char *source, void *userdata, char *dest_call) {
+    char response[256];
+    (void)timestamp;
+    (void)source;
+    (void)userdata;
+    sprintf(response, "%s:%s", callsign, msg); // Kürzeres Format für APRS
+    add_to_queue(dest_call, response);
+    return 0; // Weiter mit nächsten Nachrichten
+}
+
+void handle_wall_command(char *src_call) {
+/*    sqlite3 *db;
     int rc = sqlite3_open("apr_bbs.db", &db);
     if (rc != SQLITE_OK) {
         fprintf(stderr, "Kann DB nicht öffnen für WALL: %s\n", sqlite3_errmsg(db));
@@ -577,12 +593,19 @@ void handle_wall_command(const char *src_call) {
 
     sqlite3_finalize(stmt);
     sqlite3_close(db);
+    */
+    // get last 3 messages from DB and send to src_call
+    int shown = 0;
+    db_get_messages(g_db, queue_wall_messages, &shown, 3, src_call);
 }
+
+
 
 /// @brief Speichert ein Bulletin in der Datenbank.
 /// @param dest_call Empfänger (z.B. "BLN1")
 /// @param from_call Absender-Rufzeichen
 /// @param content   Bulletin-Inhalt
+/*
 void save_bulletin_to_db(const char *dest_call, const char *from_call, const char *content) {
     sqlite3 *db;
     char *err_msg = 0;
@@ -622,7 +645,7 @@ void save_bulletin_to_db(const char *dest_call, const char *from_call, const cha
 
     sqlite3_free(sql_insert);
     sqlite3_close(db);
-}
+}*/
 
 int main() {
     char tasks[10][20]; // Array für bis zu 10 Task-IDs
@@ -637,7 +660,15 @@ int main() {
         fprintf(stderr, "Warnung: Konnte Konfigurationsdatei %s nicht laden, benutze Defaultwerte.\n", CONFIG_PATH);
     }
 
+    // init_db aus der lokalen datei, kommt weg
     init_db();
+
+    // Datenbank initialisieren
+    g_db = db_init(g_config.db_path[0] ? g_config.db_path : "ham-bbs.sqlite3");
+    if (!g_db) {
+        fprintf(stderr, "Error: Could not open database!\n");
+        exit(1);
+    }
 
     // 1. Socket erstellen
     if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
@@ -658,6 +689,8 @@ int main() {
     printf("Verbunden mit KISS an %s:%d. Warte auf Pakete...\n", SERVER_IP, KISS_PORT);
 
     send_aprs_beacon(sock, "APX220", "!5115.52N/00622.51EBTesting APRS Daemon/Linux. Msg HELP to get started.");
+
+    db_add_bulletin(g_db, "BLN1", "DN9RZ", "Testbulletin 1234");
 
     // 3. Empfangsschleife
     while (1) {
@@ -714,14 +747,16 @@ int main() {
 
             if (is_bulletin) {
                 printf("Bulletin erkannt: %s\n", real_dest);
-                // Hier kannst du weitere Verarbeitung für Bulletins einbauen
+                //save_bulletin_to_db(real_dest, src_call, (char*)payload_ptr);
+                    db_add_bulletin(g_db, real_dest, src_call, (char*)payload_ptr);
+                    continue; // Bulletins werden nicht weiter verarbeitet
             }
 
             // pad callsign to 9 characters with spaces for comparison 
             char padded_space_callsign[10];
             memset(padded_space_callsign, ' ', 10);
             padded_space_callsign[9] = '\0'; // Null-Byte am Ende
-            strncpy(padded_space_callsign, my_callsign, strlen(my_callsign));
+            strncpy(padded_space_callsign, g_config.bbs_callsign, strlen(g_config.bbs_callsign));
             int is_message_for_me = (strcmp(real_dest, padded_space_callsign) == 0);
             if (is_message_for_me) {
                 printf("Diese Nachricht ist für mich bestimmt!\n");
@@ -731,7 +766,7 @@ int main() {
 
             // Prüfe, ob es ein ACK für eine ausgehende Nachricht ist
             char expected_ack_prefix[20];
-            sprintf(expected_ack_prefix, ":%s :ack", my_callsign);  // z. B. ":DN9RZ-10 :ack"
+            sprintf(expected_ack_prefix, ":%s :ack", g_config.bbs_callsign);  // z. B. ":DN9RZ-10 :ack"
             if (payload_ptr && strncmp((char*)payload_ptr, expected_ack_prefix, strlen(expected_ack_prefix)) == 0) {
                 char ack_id[10];
                 printf("ACK-Payload erkannt: %s\n", (char*)payload_ptr);
@@ -790,9 +825,12 @@ int main() {
                     add_to_queue(src_call, "Available commands: HELP, MSG <message>, WALL");
                 } else if (strcmp(clean_text, "WALL") == 0) {
                     handle_wall_command(src_call);
+                    last_queue_process = time(NULL)+5; // Queue in 5 Sekunden verarbeiten, damit die Antwort nicht direkt nach dem ACK kommt
                 } else if (strncmp(clean_text, "MSG ", 4) == 0) {
-                    save_message_to_bbs(src_call, (char *)payload_ptr);
+                    // save_message_to_bbs(src_call, (char *)payload_ptr);
+                    db_add_message(g_db, src_call, clean_text + 4, "APRS");
                     add_to_queue(src_call, "Message received and stored.");
+                    last_queue_process = time(NULL)+5; // Queue in 5 Sekunden verarbeiten, damit die Antwort nicht direkt nach dem ACK kommt
                 } else if (strncmp (clean_text, "PING", 4) == 0) {
                     add_to_queue(src_call, "PONG");
                 } else {

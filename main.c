@@ -11,6 +11,7 @@ db_handle_t *g_db = NULL;
 #include "session.h"
 #include "menu.h"
 #include "wall.h"
+#include "bulletins.h"
 #include "state.h"
 #include "login.h"
 #include "termutil.h"

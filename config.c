@@ -25,6 +25,7 @@ static void config_set_defaults(Config *cfg) {
     cfg->listen_port = 2323;
     strcpy(cfg->bbs_name, "Minimal BBS");
     strcpy(cfg->sysop_callsign, "DL1ABC");
+    strcpy(cfg->bbs_callsign, "DN9RZ-10");
     strcpy(cfg->grid_locator, "JO31EG");
 }
 // Liest und parsed die Config-Datei
@@ -52,6 +53,8 @@ int config_load(Config *cfg, const char *filename) {
                 strncpy(cfg->sysop_callsign, val, sizeof(cfg->sysop_callsign)-1);
             } else if (strcmp(key, "grid_locator") == 0) {
                 strncpy(cfg->grid_locator, val, sizeof(cfg->grid_locator)-1);
+            } else if (strcmp(key, "bbs_callsign") == 0) {
+                strncpy(cfg->bbs_callsign, val, sizeof(cfg->bbs_callsign)-1);
             }
             // Unbekannte Keys werden ignoriert
         }
