@@ -43,9 +43,18 @@ db_handle_t *g_db = NULL;
 void handle_signal(int sig) {
     if (sig == SIGINT || sig == SIGTERM) {
         running = 0;
+        unlink("/var/run/aprs-daemon.pid");
         printf("Signal empfangen, beende APRS Daemon...\n");
     }
 }   
+
+void write_pidfile(const char *pidfile_path) {
+    FILE *f = fopen(pidfile_path, "w");
+    if (f) {
+        fprintf(f, "%d\n", getpid());
+        fclose(f);
+    }
+}
 
 // removes KISS endbyte 0xC0 from text and replaces it with \0
 void make_clean_text(unsigned char *input, char *output) {
@@ -515,6 +524,7 @@ int main() {
         perror("Daemonisierung fehlgeschlagen");
         exit(1);
     }
+    write_pidfile("/var/run/aprs-daemon.pid");
 #endif
 
     // Signal-Handler für sauberes Beenden registrieren
