@@ -1,5 +1,7 @@
 /** Prototype of aprs daemon */
+#define RUN_AS_DAEMON
 
+#define _DEFAULT_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,17 +12,15 @@
 #include <sys/socket.h>
 #include <time.h>
 #include <sys/select.h>
+#include <signal.h>
 
 #include "config.h"
 #include "db.h"
 
-#define SERVER_IP "192.168.178.39"
 #define KISS_PORT 8001
 #define BUF_SIZE 1024
 
-
-// const char *my_callsign = "DN9RZ-10";
-
+volatile sig_atomic_t running = 1;
 
 // Neue Struktur für ausgehende Nachrichten in der Queue
 typedef struct OutgoingMessage {
@@ -39,6 +39,26 @@ time_t last_queue_process = 0;
 
 // Globaler DB-Handle
 db_handle_t *g_db = NULL;
+
+void handle_signal(int sig) {
+    if (sig == SIGINT || sig == SIGTERM) {
+        running = 0;
+        printf("Signal empfangen, beende APRS Daemon...\n");
+    }
+}   
+
+// removes KISS endbyte 0xC0 from text and replaces it with \0
+void make_clean_text(unsigned char *input, char *output) {
+    int j = 0;
+    for (int i = 0; input[i] != '\0' && j < 255; i++) {
+        if ((unsigned char)input[i] == 0xC0) {
+            output[j++] = '\0';
+        } else {
+            output[j++] = input[i];
+        }
+    }
+    output[j] = '\0';
+}
 
 /**
  * Kodiert ein Rufzeichen im AX.25-Format.
@@ -74,46 +94,6 @@ void encode_ax25_call(unsigned char *out_buf, const char *call, int is_last) {
     // 4. SSID Byte (Bit 1-4 = SSID, Bit 0 = Extension Bit, Rest meist 01100000)
     // 0x60 ist der Standard-Offset (01100000 in Binär)
     out_buf[6] = (unsigned char)((ssid << 1) | 0x60 | (is_last ? 0x01 : 0x00));
-}
-
-/// @brief Initializes the SQLite database and creates the messages table if it doesn't exist.
-void init_db() {
-    sqlite3 *db;
-    char *err_msg = 0;
-    
-    int rc = sqlite3_open("apr_bbs.db", &db);
-    if (rc != SQLITE_OK) {
-        fprintf(stderr, "Kann DB nicht öffnen: %s\n", sqlite3_errmsg(db));
-        return;
-    }
-
-    // SQL zum Erstellen der Tabelle, falls sie noch nicht existiert
-    const char *sql = 
-        "CREATE TABLE IF NOT EXISTS messages ("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "sender TEXT NOT NULL,"
-        "content TEXT NOT NULL,"
-        "received_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
-        "is_read INTEGER DEFAULT 0"
-        ");";
-
-    rc = sqlite3_exec(db, sql, 0, 0, &err_msg);
-    
-    if (rc != SQLITE_OK) {
-        fprintf(stderr, "SQL Fehler bei Init: %s\n", err_msg);
-        sqlite3_free(err_msg);
-    } else {
-        printf("Datenbank bereit (Tabelle 'messages' ist vorhanden).\n");
-    }
-
-    // Hinzufügen der Spalte message_id
-    rc = sqlite3_exec(db, "ALTER TABLE messages ADD COLUMN message_id TEXT;", 0, 0, &err_msg);
-    if (rc != SQLITE_OK && rc != SQLITE_ERROR) {  // SQLITE_ERROR wenn Spalte schon existiert
-        fprintf(stderr, "Fehler beim Hinzufügen der Spalte: %s\n", err_msg);
-        sqlite3_free(err_msg);
-    }
-
-    sqlite3_close(db);
 }
 
 /// @brief Sends an APRS message, optionally with a custom message ID for acknowledgments.
@@ -254,7 +234,6 @@ int extract_msg_id(const char *message_ptr, char *id_output) {
             i++;
         }
         id_output[i] = '\0'; 
-        
         return (i > 0); // Erfolg, wenn mindestens ein Zeichen gefunden wurde
     }
     
@@ -427,55 +406,10 @@ unsigned char *find_payload(unsigned char *ax25_start, int total_len) {
     return NULL; // Falls kein Standard-UI-Frame
 }
 
-// Ersetze die gesamte save_message_to_bbs Funktion mit diesem korrigierten Code:
-/*
-void save_message_to_bbs(const char *from_call, const char *raw_payload) {
-    sqlite3 *db;
-    char *err_msg = 0;
-    
-    // 1. Text säubern (alles nach dem zweiten Doppelpunkt bis vor die ID '{')
-    char clean_text[256] = {0};
-    char *text_start = strchr(raw_payload + 1, ':');
-    if (text_start) {
-        text_start++; // Hinter den Doppelpunkt
-        text_start += 4; // Direkt hinter "MSG "
-        strncpy(clean_text, text_start, sizeof(clean_text)-1);
-        char *id_bracket = strchr(clean_text, '{');
-        if (id_bracket) *id_bracket = '\0'; // ID abschneiden
-    }
-
-    // ID extrahieren
-    char msg_id[10] = {0};
-    int msg_id_found = extract_msg_id((char *)raw_payload, msg_id);
-
-    // 2. In Datenbank schreiben
-    int rc = sqlite3_open("apr_bbs.db", &db);
-    if (rc != SQLITE_OK) return;
-
-    // Dubletten-Prüfung mit ID
-    char *sql = sqlite3_mprintf(
-        "INSERT INTO messages (sender, content, received_at, message_id) "
-        "SELECT %Q, %Q, DATETIME('now'), %Q "
-        "WHERE NOT EXISTS (SELECT 1 FROM messages WHERE sender=%Q AND content=%Q AND message_id %s %Q);",
-        from_call, clean_text, msg_id_found ? msg_id : NULL, from_call, clean_text, msg_id_found ? "=" : "IS", msg_id_found ? msg_id : NULL
-    );
-
-    rc = sqlite3_exec(db, sql, 0, 0, &err_msg);
-    if (rc != SQLITE_OK) {
-        fprintf(stderr, "SQL Fehler: %s\n", err_msg);
-        sqlite3_free(err_msg);
-    }
-
-    sqlite3_free(sql);
-    sqlite3_close(db);
-    
-}
-*/
-
 // Funktion: Neue Nachricht zur Queue hinzufügen
 void add_to_queue(const char *dest_call, const char *text) {
     // Generiere eine eindeutige ID (Zahl + Kleinbuchstabe, z.B. "1l")
-    static int id_counter = 5;
+    static int id_counter = 1;
     char msg_id[10];
     char letters[] = "abcdefghijklmnopqrstuvwxyz";
     int letter_index = (id_counter - 1) % 26;  // Zyklisch durch Buchstaben
@@ -564,88 +498,9 @@ int queue_wall_messages(const char *callsign, const char *msg, const char *times
 }
 
 void handle_wall_command(char *src_call) {
-/*    sqlite3 *db;
-    int rc = sqlite3_open("apr_bbs.db", &db);
-    if (rc != SQLITE_OK) {
-        fprintf(stderr, "Kann DB nicht öffnen für WALL: %s\n", sqlite3_errmsg(db));
-        return;
-    }
-
-    sqlite3_stmt *stmt;
-    const char *sql = "SELECT sender, content, received_at FROM messages ORDER BY received_at DESC LIMIT 3;";
-    rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
-    if (rc != SQLITE_OK) {
-        fprintf(stderr, "SQL Prepare Fehler: %s\n", sqlite3_errmsg(db));
-        sqlite3_close(db);
-        return;
-    }
-
-    while (sqlite3_step(stmt) == SQLITE_ROW) {
-        const char *sender = (const char*)sqlite3_column_text(stmt, 0);
-        const char *content = (const char*)sqlite3_column_text(stmt, 1);
-        // const char *received_at = (const char*)sqlite3_column_text(stmt, 2);
-
-        char response[256];
-        //sprintf(response, "From %s at %s: %s", sender, received_at, content);
-        sprintf(response, "%s:%s", sender, content); // Kürzeres Format für APRS
-        add_to_queue(src_call, response);
-    }
-
-    sqlite3_finalize(stmt);
-    sqlite3_close(db);
-    */
-    // get last 3 messages from DB and send to src_call
     int shown = 0;
     db_get_messages(g_db, queue_wall_messages, &shown, 3, src_call);
 }
-
-
-
-/// @brief Speichert ein Bulletin in der Datenbank.
-/// @param dest_call Empfänger (z.B. "BLN1")
-/// @param from_call Absender-Rufzeichen
-/// @param content   Bulletin-Inhalt
-/*
-void save_bulletin_to_db(const char *dest_call, const char *from_call, const char *content) {
-    sqlite3 *db;
-    char *err_msg = 0;
-
-    int rc = sqlite3_open("apr_bbs.db", &db);
-    if (rc != SQLITE_OK) {
-        fprintf(stderr, "Kann DB nicht öffnen: %s\n", sqlite3_errmsg(db));
-        return;
-    }
-
-    // Tabelle anlegen, falls sie nicht existiert
-    const char *sql_create =
-        "CREATE TABLE IF NOT EXISTS bulletins ("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "dest_call TEXT NOT NULL,"
-        "sender TEXT NOT NULL,"
-        "content TEXT NOT NULL,"
-        "received_at DATETIME DEFAULT CURRENT_TIMESTAMP"
-        ");";
-    rc = sqlite3_exec(db, sql_create, 0, 0, &err_msg);
-    if (rc != SQLITE_OK) {
-        fprintf(stderr, "SQL Fehler bei Init: %s\n", err_msg);
-        sqlite3_free(err_msg);
-    }
-
-    // Bulletin speichern
-    char *sql_insert = sqlite3_mprintf(
-        "INSERT INTO bulletins (dest_call, sender, content, received_at) "
-        "VALUES (%Q, %Q, %Q, DATETIME('now'));",
-        dest_call, from_call, content
-    );
-    rc = sqlite3_exec(db, sql_insert, 0, 0, &err_msg);
-    if (rc != SQLITE_OK) {
-        fprintf(stderr, "SQL Fehler beim Einfügen: %s\n", err_msg);
-        sqlite3_free(err_msg);
-    }
-
-    sqlite3_free(sql_insert);
-    sqlite3_close(db);
-}*/
 
 int main() {
     char tasks[10][20]; // Array für bis zu 10 Task-IDs
@@ -655,13 +510,22 @@ int main() {
     struct sockaddr_in server_addr;
     unsigned char buffer[BUF_SIZE];
 
+#ifdef RUN_AS_DAEMON
+   if (daemon(0, 0) == -1) {
+        perror("Daemonisierung fehlgeschlagen");
+        exit(1);
+    }
+#endif
+
+    // Signal-Handler für sauberes Beenden registrieren
+    signal(SIGINT, handle_signal);
+    signal(SIGTERM, handle_signal);
+
     // Globale Konfiguration laden
+    printf("Lade Konfiguration...%s\n", CONFIG_PATH);
     if (config_load(&g_config, CONFIG_PATH) != 0) {
         fprintf(stderr, "Warnung: Konnte Konfigurationsdatei %s nicht laden, benutze Defaultwerte.\n", CONFIG_PATH);
     }
-
-    // init_db aus der lokalen datei, kommt weg
-    init_db();
 
     // Datenbank initialisieren
     g_db = db_init(g_config.db_path[0] ? g_config.db_path : "ham-bbs.sqlite3");
@@ -678,22 +542,21 @@ int main() {
 
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(KISS_PORT);
-    inet_pton(AF_INET, SERVER_IP, &server_addr.sin_addr);
+    inet_pton(AF_INET, g_config.aprs_host, &server_addr.sin_addr);
 
     // 2. Verbindung zu Direwolf aufbauen
+    printf("Verbinde zu Direwolf an %s:%d...\n", g_config.aprs_host, KISS_PORT);
     if (connect(sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
         perror("Verbindung fehlgeschlagen. Läuft Direwolf?");
         return 1;
     }
 
-    printf("Verbunden mit KISS an %s:%d. Warte auf Pakete...\n", SERVER_IP, KISS_PORT);
+    printf("Verbunden mit KISS an %s:%d. Warte auf Pakete...\n", g_config.aprs_host, KISS_PORT);
 
-    send_aprs_beacon(sock, "APX220", "!5115.52N/00622.51EBTesting APRS Daemon/Linux. Msg HELP to get started.");
-
-    db_add_bulletin(g_db, "BLN1", "DN9RZ", "Testbulletin 1234");
+    // send_aprs_beacon(sock, "APX220", "!5115.52N/00622.51EBTesting APRS Daemon/Linux. Msg HELP to get started.");
 
     // 3. Empfangsschleife
-    while (1) {
+    while (running) {
         fd_set readfds;
         struct timeval tv;
         FD_ZERO(&readfds);
@@ -748,8 +611,12 @@ int main() {
             if (is_bulletin) {
                 printf("Bulletin erkannt: %s\n", real_dest);
                 //save_bulletin_to_db(real_dest, src_call, (char*)payload_ptr);
-                    db_add_bulletin(g_db, real_dest, src_call, (char*)payload_ptr);
-                    continue; // Bulletins werden nicht weiter verarbeitet
+                char bulletin_clean_text[256] = {0};
+                make_clean_text(payload_ptr, (char*)&bulletin_clean_text);
+                //db_add_bulletin(g_db, real_dest, src_call, (char*)payload_ptr);
+                db_add_bulletin(g_db, real_dest, src_call, (char*)bulletin_clean_text);
+                // continue; // Bulletins werden nicht weiter verarbeitet
+                goto msgloop_end; // Direkt zum Ende der Nachrichtenschleife springen, da Bulletins nicht weiter verarbeitet werden 
             }
 
             // pad callsign to 9 characters with spaces for comparison 
@@ -762,6 +629,7 @@ int main() {
                 printf("Diese Nachricht ist für mich bestimmt!\n");
             } else {
                 printf("Diese Nachricht ist NICHT für mich bestimmt.\n");
+                goto msgloop_end; // Direkt zum Ende der Nachrichtenschleife springen, da Nachrichten, die nicht für uns sind, nicht weiter verarbeitet werden
             }
 
             // Prüfe, ob es ein ACK für eine ausgehende Nachricht ist
@@ -784,6 +652,7 @@ int main() {
                     printf("Bereinigte ACK-ID: %s\n", ack_id);
                     remove_from_queue(ack_id);
                     printf("ACK erhalten für ID: %s\n", ack_id);
+                    goto msgloop_end; // Direkt zum Ende der Nachrichtenschleife springen, da ACKs nicht weiter verarbeitet werden  
                 }
             }
 
@@ -827,7 +696,6 @@ int main() {
                     handle_wall_command(src_call);
                     last_queue_process = time(NULL)+5; // Queue in 5 Sekunden verarbeiten, damit die Antwort nicht direkt nach dem ACK kommt
                 } else if (strncmp(clean_text, "MSG ", 4) == 0) {
-                    // save_message_to_bbs(src_call, (char *)payload_ptr);
                     db_add_message(g_db, src_call, clean_text + 4, "APRS");
                     add_to_queue(src_call, "Message received and stored.");
                     last_queue_process = time(NULL)+5; // Queue in 5 Sekunden verarbeiten, damit die Antwort nicht direkt nach dem ACK kommt
