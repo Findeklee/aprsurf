@@ -1,5 +1,5 @@
 /** Prototype of aprs daemon */
-#define RUN_AS_DAEMON
+// #define RUN_AS_DAEMON
 
 #define _DEFAULT_SOURCE
 #include <stdio.h>

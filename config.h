@@ -1,7 +1,7 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
-#define CONFIG_PATH "/home/nn/Coding/aprs-bbs/ham-bbs.conf"
+#define CONFIG_PATH "/usr/local/etc/ham-bbs.conf"
 
 // Beispielhafte Konfigurationsstruktur
 typedef struct {
