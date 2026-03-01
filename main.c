@@ -1,9 +1,12 @@
+#define _GNU_SOURCE 1
+#define _POSIX_C_SOURCE 200809L
+#define RUN_AS_DAEMON
+
 #include <stddef.h>
-#include "db.h"
-db_handle_t *g_db = NULL;
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 #include <unistd.h>
 #include <sys/select.h>
 #include <sys/socket.h>
@@ -11,17 +14,20 @@ db_handle_t *g_db = NULL;
 #include <arpa/inet.h>
 #include <signal.h>
 #include <sys/wait.h>
+#include <sys/types.h>
 #include <pty.h>
 
+#include "termutil.h"
+#include "db.h"
 #include "session.h"
 #include "menu.h"
 #include "wall.h"
 #include "bulletins.h"
 #include "state.h"
 #include "login.h"
-#include "termutil.h"
 #include "config.h"
 
+db_handle_t *g_db = NULL;
 volatile sig_atomic_t running = 1;
 
 void handle_signal(int sig) {
@@ -30,50 +36,12 @@ void handle_signal(int sig) {
     }
 }
 
-static void remove_backspaces(char *str) {
-    int i = 0, j = 0;
-    while (str[i]) {
-        if (str[i] == 0x7F || str[i] == 0x08) {
-            if (j > 0) j--;
-        } else {
-            str[j++] = str[i];
-        }
-        i++;
+void write_pidfile(const char *pidfile_path) {
+    FILE *f = fopen(pidfile_path, "w");
+    if (f) {
+        fprintf(f, "%d\n", getpid());
+        fclose(f);
     }
-    str[j] = '\0';
-}
-
-static void backspace_feedback(void) {
-    write(STDOUT_FILENO, "\b \b", 3);
-}
-
-// Nur Datenleitung: client_fd <-> master_fd
-static int filter_telnet_iac(unsigned char *buf, int len) {
-    int i = 0, j = 0;
-    while (i < len) {
-        if (buf[i] == 255) {  // IAC
-            if (i + 1 >= len) break;
-            unsigned char cmd = buf[i+1];
-            if (cmd == 250) {
-                // SB: suche IAC SE
-                i += 2;
-                while (i + 1 < len) {
-                    if (buf[i] == 255 && buf[i+1] == 240) { i += 2; break; }
-                    i++;
-                }
-            } else if (cmd == 255) {
-                // Escaped IAC (literal 255)
-                buf[j++] = 255;
-                i += 2;
-            } else {
-                // 3-Byte Kommando (WILL/WONT/DO/DONT)
-                i += 3;
-            }
-        } else {
-            buf[j++] = buf[i++];
-        }
-    }
-    return j;
 }
 
 void run_relay(int client_fd, int master_fd) {
@@ -191,6 +159,14 @@ int main() {
         exit(1);
     }
 
+    #ifdef RUN_AS_DAEMON
+    if (daemon(0, 0) == -1) {
+            perror("Daemonisierung fehlgeschlagen");
+            exit(1);
+        }
+        write_pidfile("/var/run/aprs-daemon.pid");
+    #endif
+
     int server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd < 0) { perror("socket"); exit(1); }
 
@@ -233,10 +209,11 @@ int main() {
             }
 
             // Telnet-Setup DIREKT auf client_fd, vor PTY/fork
+            telnet_setup();
             // stdout temporär auf client_fd umbiegen
             int saved_stdout = dup(STDOUT_FILENO);
+            
             dup2(client_fd, STDOUT_FILENO);
-            telnet_setup();
             dup2(saved_stdout, STDOUT_FILENO);
             close(saved_stdout);
 
@@ -248,13 +225,14 @@ int main() {
                 close(master_fd);
                 close(client_fd);
 
+                 // Neue Session-Gruppe für PTY
+                setsid();
+
                 // Slave auf STDIN/STDOUT/STDERR
+                ioctl(slave_fd, TIOCSCTTY, 0);
                 dup2(slave_fd, STDIN_FILENO);
                 dup2(slave_fd, STDOUT_FILENO);
                 close(slave_fd);
-
-                // Neue Session-Gruppe für PTY
-                setsid();
 
                 fprintf(stderr, "[handler] gestartet PID=%d\n", getpid());
                 enable_raw_mode();

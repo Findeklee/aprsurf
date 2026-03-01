@@ -69,6 +69,8 @@ void handle_login(Session *s, char *input) {
         // Wechsel zurück zu Raw-Mode für Menüs (sofortige Tastenreaktionen)
         enable_raw_mode();
         printf("\nWelcome, %s!\r\n", s->callsign);
+        fflush(stdout);
+        sleep(1); // Kurze Pause, damit der User die Willkommensnachricht sieht
         // Log the login
         if (g_db) db_add_lastlog(g_db, s->callsign);
         switch_to_menu(s);

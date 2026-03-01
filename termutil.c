@@ -78,3 +78,32 @@ void telnet_setup() {
 
     fflush(stdout);
 }
+
+// Nur Datenleitung: client_fd <-> master_fd
+int filter_telnet_iac(unsigned char *buf, int len) {
+    int i = 0, j = 0;
+    while (i < len) {
+        if (buf[i] == 255) {  // IAC
+            if (i + 1 >= len) break;
+            unsigned char cmd = buf[i+1];
+            if (cmd == 250) {
+                // SB: suche IAC SE
+                i += 2;
+                while (i + 1 < len) {
+                    if (buf[i] == 255 && buf[i+1] == 240) { i += 2; break; }
+                    i++;
+                }
+            } else if (cmd == 255) {
+                // Escaped IAC (literal 255)
+                buf[j++] = 255;
+                i += 2;
+            } else {
+                // 3-Byte Kommando (WILL/WONT/DO/DONT)
+                i += 3;
+            }
+        } else {
+            buf[j++] = buf[i++];
+        }
+    }
+    return j;
+}
