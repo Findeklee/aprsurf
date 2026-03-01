@@ -15,6 +15,7 @@ void handle_login(Session *s, char *input) {
     if (esc_phase) {
         // Warte auf ESC, um den Puffer zu synchronisieren
         if (strlen(input) == 0) {
+            enable_raw_mode();
             printf("\nPlease press ESC to start login...\n");
             fflush(stdout);
             return;

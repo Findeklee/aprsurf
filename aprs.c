@@ -112,6 +112,7 @@ void receive_packets(int sockfd) {
                 bytes_received = recv(sockfd, buffer, sizeof(buffer), 0);
                 if (bytes_received <= 0) {
                     printf("Connection closed or error\n");
+                    fflush(stdout);
                     break;
                 }
 
@@ -158,20 +159,27 @@ void receive_packets(int sockfd) {
                         strftime(time_str, sizeof(time_str), "%H:%M:%S", tm_info);
 
                         printf("[%s] %s>%s:", time_str, call_from, call_to);
+                        fflush(stdout);
+
                         for (unsigned int i = 0; i < info_len; ++i) {
                             if (isprint(info[i])) {
                                 putchar(info[i]);
                             } else {
                                 printf("\\x%02X", info[i]);
+                                fflush(stdout);
+
                             }
                         }
                         printf("\n");
+                        fflush(stdout);
+
                     }
                 }
             }
         }
     }
     printf("Exiting APRS monitor...\n");
+    fflush(stdout);
     return;
 }
 
@@ -179,18 +187,22 @@ void handle_aprs_monitor(Session *s, char *input) {
     if (strlen(input) == 0) {
         // Bildschirm löschen (ANSI ESC [2J [H)
         printf("\033[2J\033[H");
+        fflush(stdout);
         const char *host = "192.168.178.39";
         int port = 8000;
 
         int sockfd = connect_to_agwpe(host, port);
         if (sockfd < 0) {
             printf("Failed to connect to AGWPE server at %s:%d\n", host, port);
+            fflush(stdout);
             sleep(2);
             goto exit;
         }
 
     printf("\nAPRS Monitor\n");
     printf("Connecting to TNC...\n");
+    fflush(stdout);
+
     sleep(1);
     
     // Send registration
@@ -198,9 +210,11 @@ void handle_aprs_monitor(Session *s, char *input) {
 
     printf("Connected to AGWPE server at %s:%d\n", host, port);
     printf("\nStarted monitoring APRS packets...\n(Press any key to quit monitor)\n\n");
+    fflush(stdout);
 
     // Receive and display packets
     receive_packets(sockfd);
+    fflush(stdout);
 
     exit:
     close(sockfd);

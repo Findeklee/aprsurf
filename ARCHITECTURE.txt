@@ -1,0 +1,230 @@
+ham-bbs – Telnet-Daemon Architektur
+=====================================
+Erstellt: 2026-03-01
+
+
+ÜBERSICHT
+---------
+ham-bbs ist ein Telnet-basiertes BBS (Bulletin Board System) für Funkamateure.
+Es läuft als eigenständiger Daemon (kein busybox-telnetd nötig) und akzeptiert
+mehrere gleichzeitige Verbindungen über TCP auf Port 2323 (konfigurierbar).
+
+
+PROZESS-ARCHITEKTUR
+-------------------
+
+Für jede eingehende Verbindung werden ZWEI Kindprozesse geforkt:
+
+    [Hauptprozess]
+         |
+         | accept()
+         |
+    [Kindprozess pro Client]
+         |
+         |--- fork() ---> [Relay-Prozess]    (läuft in run_relay())
+         |                     |
+         |                     | client_fd <-> master_fd
+         |                     |
+         `--- fork() ---> [Handler-Prozess]  (läuft in run_session_loop())
+                               |
+                               | STDIN/STDOUT = slave_fd (PTY)
+
+
+DATEI-DESKRIPTOREN PRO PROZESS
+-------------------------------
+
+Relay-Prozess:
+  client_fd   – TCP-Socket zum Telnet-Client
+  master_fd   – PTY-Master (Außenseite des virtuellen Terminals)
+
+Handler-Prozess:
+  STDIN  (0)  – PTY-Slave (= slave_fd nach dup2)
+  STDOUT (1)  – PTY-Slave (= slave_fd nach dup2)
+  (client_fd und master_fd sind geschlossen)
+
+
+PSEUDO-TERMINAL (PTY)
+---------------------
+
+openpty() erzeugt ein Master/Slave-Paar:
+
+  master_fd <----> [PTY-Kernel] <----> slave_fd
+
+Das PTY verhält sich wie ein echtes Terminal (TTY):
+  - tcsetattr() und tcgetattr() funktionieren auf slave_fd
+  - Der Kernel übernimmt Echo, Canonical-Pufferung, Backspace-Verarbeitung
+  - ICANON, ECHO, ISIG können per tcsetattr gesetzt/gelöscht werden
+
+Der Handler-Prozess ruft setsid() auf, damit slave_fd zum Controlling Terminal
+der neuen Session wird. Erst dann greifen tcsetattr()-Aufrufe korrekt.
+
+
+DATENFLUSS
+----------
+
+Eingabe (Tastendruck des Benutzers):
+  [Telnet-Client]
+       | TCP
+  [client_fd] → read() im Relay
+       | filter_telnet_iac() entfernt IAC-Sequenzen
+  [master_fd] → write()
+       | PTY-Kernel verarbeitet (Echo, Canonical etc.)
+  [slave_fd = STDIN] → read() im Handler-Prozess
+       |
+  [Handler (handle_login, handle_menu, ...)]
+
+Ausgabe (Text an den Benutzer):
+  [Handler] → printf() → STDOUT = slave_fd
+       | PTY-Kernel
+  [master_fd] → read() im Relay
+       | (kein Filtering nötig)
+  [client_fd] → write()
+       |
+  [Telnet-Client] zeigt Text an
+
+
+TELNET-HANDSHAKE
+----------------
+
+Direkt nach accept(), noch VOR dem PTY-Fork, werden Telnet-Kommandos direkt
+auf client_fd geschrieben (STDOUT wird temporär auf client_fd umgebogen):
+
+  IAC WILL ECHO           (255 251 1)
+    → Server übernimmt das Echo; Client soll kein lokales Echo mehr anzeigen.
+
+  IAC WILL SUPPRESS-GO-AHEAD  (255 251 3)
+    → Server unterdrückt GA-Signale. GA ist ein veralteter Halbduplex-Mechanismus.
+      Ohne SUPPRESS-GO-AHEAD würde der Client auf GA warten bevor er Daten sendet.
+
+  IAC DO SUPPRESS-GO-AHEAD   (255 253 3)
+    → Gleiche Aufforderung an den Client.
+
+  IAC WONT LINEMODE       (255 252 34)
+    → Server lehnt Linemode ab. Daraufhin wechselt der Client in den
+      Character-Mode: Jeder Tastendruck wird sofort gesendet, ohne auf
+      Enter zu warten.
+
+Ohne diesen Handshake würde der Client im Standard-Linemode bleiben und Eingaben
+erst nach Enter senden – einzelne Tasten (ESC, Menübefehle) würden nicht
+funktionieren.
+
+Die Kommandos müssen VOR dem PTY gesendet werden, weil sie direkt an den
+Telnet-Client gehen müssen und nicht durch die PTY laufen dürfen.
+
+
+TELNET IAC-FILTERUNG
+--------------------
+
+Der Relay-Prozess filtert eingehende IAC-Sequenzen aus dem Client-Stream heraus
+(filter_telnet_iac()), bevor sie an die PTY weitergeleitet werden. Sonst würden
+Telnet-Verhandlungssequenzen (z.B. Antworten des Clients auf unsere Kommandos,
+oder Null-Bytes) als Eingabezeichen beim Handler ankommen.
+
+Gefiltert werden:
+  - 3-Byte-Kommandos: IAC WILL/WONT/DO/DONT <option>
+  - Subnegotiation: IAC SB ... IAC SE
+  - Escaped IAC (255 255) → wird zu einem einzelnen 255-Byte
+
+\r wird im Handler-Prozess ignoriert (Telnet sendet \r\n, nicht nur \n).
+
+
+TERMINAL-MODUS-WECHSEL
+-----------------------
+
+Handler können den Terminal-Modus per tcsetattr wechseln (in termutil.c).
+Der Modus-Wechsel hat zwei Ebenen:
+
+1. PTY-Slave-Seite (Kernel):
+   enable_raw_mode()       → ICANON, ECHO, ISIG aus
+   enable_canonical_mode() → ICANON, ECHO ein
+
+2. Telnet-Client-Seite (Netzwerk):
+   enable_raw_mode() sendet zusätzlich:
+     IAC WILL ECHO, IAC WILL/DO SUPPRESS-GO-AHEAD, IAC WONT LINEMODE
+     → Client wechselt zu Character-Mode
+
+   enable_canonical_mode() sendet zusätzlich:
+     IAC DO LINEMODE, IAC SB LINEMODE MODE 0 IAC SE, IAC DONT ECHO
+     → Client wechselt zu Line-Mode (puffert bis Enter, macht selbst Echo)
+
+Beide Ebenen müssen synchron gewechselt werden, damit Client und Server
+übereinstimmen.
+
+
+MODUS-ERKENNUNG IN run_session_loop()
+--------------------------------------
+
+run_session_loop() liest immer einzelne Zeichen (read(..., 1)).
+Nach jedem Zeichen prüft es den aktuellen Modus per tcgetattr():
+
+  ICANON gesetzt (Canonical):
+    → Zeichen in line_buf sammeln bis \n kommt
+    → Komplette Zeile an Handler übergeben
+
+  ICANON nicht gesetzt (Raw):
+    → Einzelnes Zeichen sofort an Handler übergeben
+
+Damit funktionieren beide Modi mit demselben read()-Aufruf.
+
+
+STATE-MACHINE
+-------------
+
+Jede Session hat einen Handler-Pointer und ein state_changed-Flag (in session.h):
+
+  current_user->handler       = aktueller Handler (handle_login, handle_menu, ...)
+  current_user->state_changed = 1, wenn Handler gewechselt wurde
+
+run_session_loop() prüft state_changed VOR jedem read(). Wenn gesetzt:
+  → Handler mit leerem Input ("") aufrufen (Initialisierung des neuen States)
+  → state_changed = 0 setzen
+
+Dies geschieht in einer while-Schleife (nicht if), damit Ketten von
+State-Wechseln (A→B→C) ohne Tastendruck direkt abgearbeitet werden.
+
+Typischer Login-Ablauf:
+  handle_login  (Raw-Mode)    → wartet auf ESC
+  handle_login  (Canonical)   → wartet auf Callsign + Enter
+  handle_login  (Raw-Mode)    → Callsign akzeptiert → switch_to_menu()
+  handle_menu   (Raw-Mode)    → wartet auf einzelne Taste
+
+
+VERBINDUNGSTRENNUNG
+-------------------
+
+Wenn der Client die Verbindung trennt:
+  - read(client_fd) im Relay gibt 0 oder -1 zurück
+  - run_relay() bricht ab
+  - Relay-Prozess sendet SIGTERM an Handler-Prozess (kill(handler_pid, SIGTERM))
+  - waitpid() wartet auf Handler-Prozess
+  - Relay-Prozess schließt master_fd und client_fd und beendet sich (exit(0))
+  - Hauptprozess räumt Zombie-Prozesse via SIGCHLD auf (SIG_DFL)
+
+
+MEHRFACH-VERBINDUNGEN
+---------------------
+
+Der Hauptprozess forkt für jede Verbindung. Dadurch:
+  - Jede Session ist vollständig isoliert (eigene Prozesse, eigene PTY)
+  - Absturz einer Session beeinflusst andere nicht
+  - Kein Locking auf der Datenbank nötig (SQLite unterstützt mehrere Leser,
+    Schreibzugriffe werden von SQLite selbst serialisiert)
+
+
+DATEIEN
+-------
+
+  main.c        – Daemon-Hauptprozess, Relay, Session-Loop
+  termutil.c    – Terminal-Modus-Funktionen + Telnet-Kommandos
+  termutil.h    – Interface für termutil
+  login.c       – Login-Handler (ESC → Callsign → Validierung)
+  menu.c        – Hauptmenü-Handler
+  session.h     – Session-Struct (callsign, handler, state_changed, ...)
+  state.c/h     – State-Wechsel-Hilfsfunktionen (switch_to_menu etc.)
+  wall.c/h      – Message Wall Handler
+  bulletins.c/h – Bulletins Handler
+  bbsinfo.c/h   – BBS-Info Handler
+  userinfo.c/h  – User-Info Handler
+  aprs.c/h      – APRS-Monitor Handler (AGWPE/KISS-Verbindung)
+  db.c/h        – SQLite-Datenbankzugriff
+  config.c/h    – Konfigurationsdatei-Parser

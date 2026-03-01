@@ -32,7 +32,8 @@ void handle_wall(Session *s, char *input) {
         printf("\033[0m\033[1;34m--------------------------------------------------------------------------------");
         printf("\n\033[34m(\033[33mw\033[34m) \033[37mWrite Message        ");
         printf("\033[34m(\033[33m\033[33mx\033[34m) \033[37mExit to menu\n");
-        printf("> "); fflush(stdout);
+        printf("> "); 
+        fflush(stdout);
         return;
     }
     if (s->writing_message) {
@@ -44,16 +45,19 @@ void handle_wall(Session *s, char *input) {
         msg[60] = '\0';
         // ask for confirmation
         printf("\nYou entered:\n\"%s\"\n", msg);
-        printf("Save to Wall? (y/n): "); fflush(stdout);
+        printf("Save to Wall? (y/n): "); 
+        fflush(stdout);
         char conf[2];
         if (fgets(conf, sizeof(conf), stdin) == NULL) {
             printf("Aborted.\n");
+            fflush(stdout);
             sleep(1);
             switch_to_wall(s);
             return;
         }
         if (conf[0] != 'y' && conf[0] != 'Y') {
             printf("Aborted.\n");
+            fflush(stdout);
             sleep(1);
             switch_to_wall(s);
             return;
@@ -65,8 +69,10 @@ void handle_wall(Session *s, char *input) {
         }
         if (ok) {
             printf("Message saved to Wall!\n");
+            fflush(stdout);
         } else {
             printf("Error saving message!\n");
+            fflush(stdout);
         }
         sleep(1);
         // State auf Wall zurücksetzen, um neu zu laden
