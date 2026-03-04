@@ -38,6 +38,7 @@ void handle_login(Session *s, char *input) {
     // Wenn noch kein Rufzeichen gesetzt ist, fordere zur Eingabe auf und schalte in den Kanonischen Modus
     if (strlen(s->callsign) == 0 && strlen(input) == 0) {
         // Prompt wurde schon oben ausgegeben
+        printf("dfgdfgd");
         return;
     }
     // Wenn Eingabe vorhanden, direkt übernehmen (zentral gefiltert)
@@ -57,6 +58,7 @@ void handle_login(Session *s, char *input) {
             if (isdigit(*p)) has_digit = true;
         }
         if (len > 8 || !has_letter || !has_digit) {
+            s->callsign[0] = '\0';
             printf("Invalid callsign. Must be <=8 characters, contain letters and at least one number.\n");
             printf("Please enter callsign: ");
             fflush(stdout);

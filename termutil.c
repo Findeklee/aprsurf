@@ -101,6 +101,17 @@ int filter_telnet_iac(unsigned char *buf, int len) {
                 // 3-Byte Kommando (WILL/WONT/DO/DONT)
                 i += 3;
             }
+        } else if (buf[i] == '\r') {
+            i++;
+            if (i < len && buf[i] == '\0') {
+                // \r\0 → Zeilenende, als \n ausgeben
+                buf[j++] = '\n';
+                i++;
+            }
+            // \r\n → \r weglassen, \n kommt im nächsten Durchlauf normal durch
+        } else if (buf[i] == '\0') {
+            // loses Null-Byte überspringen
+            i++;
         } else {
             buf[j++] = buf[i++];
         }

@@ -1,6 +1,6 @@
 #define _GNU_SOURCE 1
 #define _POSIX_C_SOURCE 200809L
-#define RUN_AS_DAEMON
+// #define RUN_AS_DAEMON
 
 #include <stddef.h>
 #include <stdio.h>
@@ -145,9 +145,16 @@ void run_session_loop(void) {
 }
 
 int main() {
-    signal(SIGINT, handle_signal);
-    signal(SIGTERM, handle_signal);
-    signal(SIGCHLD, SIG_DFL);
+    // SA_RESTART NICHT setzen: blockierendes read() soll bei SIGTERM mit EINTR
+    // abbrechen, damit der Handler-Prozess sauber endet.
+    struct sigaction sa = {0};
+    sa.sa_handler = handle_signal;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    sigaction(SIGINT,  &sa, NULL);
+    sigaction(SIGTERM, &sa, NULL);
+
+    signal(SIGCHLD, SIG_IGN);  // Kindprozesse automatisch reapen, keine Zombies
 
     if (config_load(&g_config, CONFIG_PATH) != 0) {
         fprintf(stderr, "Warnung: Konnte Konfigurationsdatei %s nicht laden.\n", CONFIG_PATH);
@@ -164,7 +171,7 @@ int main() {
             perror("Daemonisierung fehlgeschlagen");
             exit(1);
         }
-        write_pidfile("/var/run/aprs-daemon.pid");
+        write_pidfile("/var/run/ham-bbs.pid");
     #endif
 
     int server_fd = socket(AF_INET, SOCK_STREAM, 0);
