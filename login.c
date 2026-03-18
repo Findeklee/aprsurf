@@ -15,6 +15,7 @@ void handle_login(Session *s, char *input) {
     if (esc_phase) {
         // Warte auf ESC, um den Puffer zu synchronisieren
         if (strlen(input) == 0) {
+            enable_raw_mode();
             printf("\nPlease press ESC to start login...\n");
             fflush(stdout);
             return;
@@ -37,6 +38,7 @@ void handle_login(Session *s, char *input) {
     // Wenn noch kein Rufzeichen gesetzt ist, fordere zur Eingabe auf und schalte in den Kanonischen Modus
     if (strlen(s->callsign) == 0 && strlen(input) == 0) {
         // Prompt wurde schon oben ausgegeben
+        printf("dfgdfgd");
         return;
     }
     // Wenn Eingabe vorhanden, direkt übernehmen (zentral gefiltert)
@@ -56,6 +58,7 @@ void handle_login(Session *s, char *input) {
             if (isdigit(*p)) has_digit = true;
         }
         if (len > 8 || !has_letter || !has_digit) {
+            s->callsign[0] = '\0';
             printf("Invalid callsign. Must be <=8 characters, contain letters and at least one number.\n");
             printf("Please enter callsign: ");
             fflush(stdout);
@@ -68,6 +71,8 @@ void handle_login(Session *s, char *input) {
         // Wechsel zurück zu Raw-Mode für Menüs (sofortige Tastenreaktionen)
         enable_raw_mode();
         printf("\nWelcome, %s!\r\n", s->callsign);
+        fflush(stdout);
+        sleep(1); // Kurze Pause, damit der User die Willkommensnachricht sieht
         // Log the login
         if (g_db) db_add_lastlog(g_db, s->callsign);
         switch_to_menu(s);

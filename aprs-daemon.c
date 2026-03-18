@@ -36,6 +36,7 @@ typedef struct OutgoingMessage {
 OutgoingMessage *message_queue = NULL;
 
 time_t last_queue_process = 0;
+time_t last_beacon_time = 0;
 
 // Globaler DB-Handle
 db_handle_t *g_db = NULL;
@@ -564,6 +565,8 @@ int main() {
     printf("Verbunden mit KISS an %s:%d. Warte auf Pakete...\n", g_config.aprs_host, KISS_PORT);
 
     // send_aprs_beacon(sock, "APX220", "!5115.52N/00622.51EBTesting APRS Daemon/Linux. Msg HELP to get started.");
+    send_aprs_beacon(sock, "APX220", "!5115.52N/00622.51EBBBS telnet localhost 2323 or msg HELP");
+    last_beacon_time = time(NULL);
 
     // 3. Empfangsschleife
     while (running) {
@@ -728,6 +731,10 @@ msgloop_end:
             last_queue_process = now;
         }
 
+        if (now - last_beacon_time >= 1200) { // Alle 20 Minuten ein Beacon senden
+            send_aprs_beacon(sock, "APX220", "!5115.52N/00622.51EBBBS telnet localhost 2323 or msg HELP");
+            last_beacon_time = now;
+        }
     }
 
 close(sock);

@@ -23,7 +23,7 @@ void handle_menu(Session *s, char *input) {
         printf("\nMain Menu\n");
         printf("=========\n");
         printf("m) Message Wall\n");
-        printf("r) Read Bulletins! (Not yet)\n");
+        printf("r) Read Bulletins!\n");
         printf("b) BBS Info\n");
         printf("u) User Info\n");
         printf("a) APRS Monitor\n");
