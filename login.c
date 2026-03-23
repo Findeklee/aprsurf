@@ -4,7 +4,6 @@
 #include <string.h>
 #include "termutil.h"
 #include <unistd.h>
-#include <termios.h>
 #include <ctype.h>
 #include "db.h"
 #include <stdbool.h>
@@ -36,10 +35,12 @@ extern db_handle_t *g_db;
 void handle_login(Session *s, char *input) {
     static bool esc_phase = true;
     static bool title_shown = false;
+    static char callsign_buf[MAX_CALLSIGN_LENGTH + 2];
+    static int callsign_pos = 0;
+
     if (esc_phase) {
         // Warte auf ESC, um den Puffer zu synchronisieren
         if (strlen(input) == 0) {
-            enable_raw_mode();
             printf("\nPlease press ESC to start login...\n");
             fflush(stdout);
             return;
@@ -47,10 +48,8 @@ void handle_login(Session *s, char *input) {
         // Prüfe, ob die Eingabe exakt ein ESC-Zeichen ist
         if (strlen(input) == 1 && (unsigned char)input[0] == ESC_CHAR) {
             esc_phase = false;
-            // Wechsel zu Canonical-Modus für callsign-Eingabe mit Echo und Backspace
-            enable_canonical_mode();
-            tcflush(STDIN_FILENO, TCIFLUSH);
-            tcflush(STDOUT_FILENO, TCOFLUSH);
+            callsign_pos = 0;
+            callsign_buf[0] = '\0';
             if (!title_shown) {
                 printf("\033[2J\033[H");
                 show_title_file();
@@ -65,8 +64,12 @@ void handle_login(Session *s, char *input) {
             return;
         }
     }
-    // Wenn noch kein Rufzeichen gesetzt ist, fordere zur Eingabe auf und schalte in den Kanonischen Modus
-    if (strlen(s->callsign) == 0 && strlen(input) == 0) {
+
+    // Callsign-Eingabe im Raw-Mode: Zeichen-für-Zeichen mit Echo.
+    // Kein enable_canonical_mode() – vermeidet IAC DO LINEMODE, das manche
+    // Clients (z.B. icy-term) verwirrt und die Enter-Taste blockiert.
+    if (strlen(input) == 0) {
+        // state_changed-Callback: Prompt anzeigen
         if (!title_shown) {
             show_title_file();
             title_shown = true;
@@ -75,16 +78,31 @@ void handle_login(Session *s, char *input) {
         fflush(stdout);
         return;
     }
-    // Wenn Eingabe vorhanden, direkt übernehmen (zentral gefiltert)
-    if (strlen(input) > 0) {
-        strncpy(s->callsign, input, sizeof(s->callsign)-1);
-        s->callsign[sizeof(s->callsign)-1] = '\0';
+
+    char c = input[0];
+
+    if (c == '\n' || c == '\r') {
+        // Enter gedrückt – Rufzeichen verarbeiten
+        printf("\r\n");
+        fflush(stdout);
+
+        callsign_buf[callsign_pos] = '\0';
+        int len = callsign_pos;
+        callsign_pos = 0;
+
+        if (len == 0) {
+            printf("Please enter callsign: ");
+            fflush(stdout);
+            return;
+        }
+
+        strncpy(s->callsign, callsign_buf, sizeof(s->callsign) - 1);
+        s->callsign[sizeof(s->callsign) - 1] = '\0';
         // Rufzeichen in Uppercase konvertieren
         for (char *p = s->callsign; *p; ++p) {
             *p = toupper(*p);
         }
         // Prüfe Rufzeichen: <=MAX_CALLSIGN_LENGTH Zeichen, muss Buchstaben und mindestens eine Zahl enthalten
-        int len = strlen(s->callsign);
         bool has_letter = false;
         bool has_digit = false;
         for (char *p = s->callsign; *p; ++p) {
@@ -98,7 +116,7 @@ void handle_login(Session *s, char *input) {
             fflush(stdout);
             return;
         }
-        fflush(stdout);
+
         // Bildschirm löschen (ANSI ESC [2J [H)
         printf("\033[2J\033[H");
         fflush(stdout);
@@ -110,6 +128,25 @@ void handle_login(Session *s, char *input) {
         // Log the login
         if (g_db) db_add_lastlog(g_db, s->callsign);
         switch_to_menu(s);
+        return;
+    }
+
+    if (c == 0x7F || c == 0x08) {
+        // Backspace: letztes Zeichen löschen
+        if (callsign_pos > 0) {
+            callsign_pos--;
+            printf("\x08 \x08");
+            fflush(stdout);
+        }
+        return;
+    }
+
+    if (isprint((unsigned char)c)) {
+        if (callsign_pos < MAX_CALLSIGN_LENGTH) {
+            callsign_buf[callsign_pos++] = c;
+            printf("%c", c); // Echo
+            fflush(stdout);
+        }
         return;
     }
 }

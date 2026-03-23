@@ -112,8 +112,8 @@ void run_session_loop(void) {
             break;
         }
 
-        // \r als Fallback ignorieren (wird normalerweise schon in filter_telnet_iac zu \n normalisiert)
-        if (c == '\r') continue;
+        // \r als Fallback zu \n normalisieren (z.B. wenn \r\n in zwei TCP-Paketen ankommt)
+        if (c == '\r') c = '\n';
 
         struct termios term;
         tcgetattr(STDIN_FILENO, &term);
@@ -215,14 +215,17 @@ int main() {
                 perror("openpty"); close(client_fd); exit(1);
             }
 
-            // Telnet-Setup DIREKT auf client_fd, vor PTY/fork
-            telnet_setup();
-            // stdout temporär auf client_fd umbiegen
-            int saved_stdout = dup(STDOUT_FILENO);
-            
-            dup2(client_fd, STDOUT_FILENO);
-            dup2(saved_stdout, STDOUT_FILENO);
-            close(saved_stdout);
+            // Telnet-Setup direkt auf client_fd schreiben (nicht über stdout/PTY)
+            // Muss vor dem Handler-Fork passieren, damit der Client sofort in Character-Mode wechselt
+            {
+                static const unsigned char telnet_init[] = {
+                    255, 251, 1,   // IAC WILL ECHO       – Server übernimmt Echo
+                    255, 251, 3,   // IAC WILL SGA        – kein Go-Ahead
+                    255, 253, 3,   // IAC DO SGA          – Client soll ebenfalls SGA unterdrücken
+                    255, 252, 34,  // IAC WONT LINEMODE   – Character-Mode (kein Zeilenpuffer im Client)
+                };
+                write(client_fd, telnet_init, sizeof(telnet_init));
+            }
 
             // Fork für Handler
             pid_t handler_pid = fork();
