@@ -103,12 +103,12 @@ int filter_telnet_iac(unsigned char *buf, int len) {
             }
         } else if (buf[i] == '\r') {
             i++;
-            if (i < len && buf[i] == '\0') {
-                // \r\0 → Zeilenende, als \n ausgeben
-                buf[j++] = '\n';
+            // Nachfolgendes \n oder \0 konsumieren (NVT \r\n und \r\0)
+            if (i < len && (buf[i] == '\n' || buf[i] == '\0')) {
                 i++;
             }
-            // \r\n → \r weglassen, \n kommt im nächsten Durchlauf normal durch
+            // Immer als \n ausgeben – auch nacktes \r (z.B. SyncTerm)
+            buf[j++] = '\n';
         } else if (buf[i] == '\0') {
             // loses Null-Byte überspringen
             i++;

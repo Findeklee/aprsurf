@@ -1,14 +1,14 @@
 CC=gcc
 CFLAGS=-Wall -Wextra -pedantic -std=c99
-all: ham-bbs lastlog-viewer aprs-daemon
+all: aprsurf-bbs lastlog-viewer aprs-daemon aprsurf-msg
 
-ham-bbs: $(OBJS)
+aprsurf-bbs: $(OBJS)
 
 OBJS=main.o session.o menu.o wall.o state.o termutil.o bulletins.o bbsinfo.o userinfo.o login.o config.o db.o aprs.o 
 aprs.o: aprs.c aprs.h
 config.o: config.c config.h
 
-ham-bbs: $(OBJS)
+aprsurf-bbs: $(OBJS)
 	$(CC) $(CFLAGS) -o $@ $(OBJS) -lsqlite3
 db.o: db.c db.h
 
@@ -31,9 +31,9 @@ help:
 	@echo "  make deb       - Baut das Debianpaket (my-bbs_1.0-1.deb)"
 	@echo "  make help      - Zeigt diese Hilfe an"
 
-start: ham-bbs
+start: aprsurf-bbs
 	@echo "Listening on port 2323 (busybox-telnetd)"
-	busybox telnetd -l ./ham-bbs -p 2323 -F
+	busybox telnetd -l ./aprsurf-bbs -p 2323 -F
 	
 state.o: state.c state.h menu.h wall.h
 termutil.o: termutil.c termutil.h
@@ -41,8 +41,10 @@ termutil.o: termutil.c termutil.h
 lastlog-viewer: lastlog-viewer.c
 	$(CC) $(CFLAGS) -o $@ $< -lsqlite3
 
-clean:
-	rm -f *.o ham-bbs lastlog-viewer aprs-daemon
+aprsurf-msg: aprs-msg-viewer.c config.o
+	$(CC) $(CFLAGS) -o $@ $^ -lsqlite3
 
+clean:
+	rm -f *.o aprsurf-bbs lastlog-viewer aprs-daemon aprsurf-msg
 deb:
 	dpkg-deb --build my-bbs_1.0-1

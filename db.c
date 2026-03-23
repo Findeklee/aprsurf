@@ -58,6 +58,39 @@ bool db_add_message(db_handle_t *db, const char *callsign, const char *msg, cons
     return rc == SQLITE_DONE;
 }
 
+bool db_add_aprs_message(db_handle_t *db, const char *from_call, const char *content){
+    fprintf(stderr, "db_add_aprs_message aufgerufen mit from_call=%s, content=%s\n", from_call, content);
+    if (!db || !from_call || !content) return false;
+    // Nachricht in eigener Tabelle speichern, damit sie nicht in der Wall erscheint
+    const char *sql_create =
+        "CREATE TABLE IF NOT EXISTS aprs_messages ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "from_call TEXT NOT NULL,"
+        "content TEXT NOT NULL,"
+        "received_at DATETIME DEFAULT CURRENT_TIMESTAMP"
+        ");";
+    char *err_msg = NULL;
+    int rc = sqlite3_exec(db->db, sql_create, 0, 0, &err_msg);
+    if (rc != SQLITE_OK) {
+        fprintf(stderr, "SQL Fehler bei APRS Message Init: %s\n", err_msg);
+        sqlite3_free(err_msg);
+        return false;
+    }
+    const char *sql = "INSERT INTO aprs_messages (from_call, content, received_at) VALUES (?, ?, ?);";
+    sqlite3_stmt *stmt = NULL;
+    time_t now = time(NULL);
+    char tbuf[32];
+    strftime(tbuf, sizeof(tbuf), "%Y-%m-%d %H:%M:%S", localtime(&now));
+    if (sqlite3_prepare_v2(db->db, sql, -1, &stmt, 0) != SQLITE_OK) return false;
+    sqlite3_bind_text(stmt, 1, from_call, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, content, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 3, tbuf, -1, SQLITE_TRANSIENT);
+    int rc2 = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    return rc2 == SQLITE_DONE;
+
+}
+
 int db_get_messages(db_handle_t *db, db_message_callback cb, void *userdata, int limit, char *src_call) {
     if (!db || !cb) return -1;
     if (limit <= 0) limit = 100; // Default limit

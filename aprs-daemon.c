@@ -1,5 +1,6 @@
 /** Prototype of aprs daemon */
 // #define RUN_AS_DAEMON
+ #define DEBUG
 
 #define _DEFAULT_SOURCE
 #include <stdio.h>
@@ -20,9 +21,11 @@
 #define KISS_PORT 8001
 #define BUF_SIZE 1024
 
+#define APRS_DEST_CALL "APZS01" 
+
 volatile sig_atomic_t running = 1;
 
-// Neue Struktur für ausgehende Nachrichten in der Queue
+// Struktur für ausgehende Nachrichten in der Queue
 typedef struct OutgoingMessage {
     char dest_call[10];      // Ziel-Call (z. B. "DB0ABC-1")
     char text[256];          // Nachrichtentext
@@ -41,11 +44,18 @@ time_t last_beacon_time = 0;
 // Globaler DB-Handle
 db_handle_t *g_db = NULL;
 
+void generate_beacon_text(char *buffer, size_t buf_size) {
+    snprintf(buffer, buf_size, "!%02d%05.2fN/%03d%05.2fEB%s", 
+             (int)g_config.gps_lat, (g_config.gps_lat - (int)g_config.gps_lat) * 60,
+             (int)g_config.gps_lon, (g_config.gps_lon - (int)g_config.gps_lon) * 60,
+             g_config.beacon_text);
+}
+
 void handle_signal(int sig) {
     if (sig == SIGINT || sig == SIGTERM) {
         running = 0;
         unlink("/var/run/aprs-daemon.pid");
-        printf("Signal empfangen, beende APRS Daemon...\n");
+        fprintf(stderr, "Signal empfangen, beende APRS Daemon...\n");
     }
 }   
 
@@ -131,10 +141,6 @@ void send_aprs_message(int sock, const char *dest_call, const char *text, const 
     frame[p++] = (target_ssid << 1) | 0x60; 
 
     // 3. ABSENDER (Deine BBS: DN9RZ-10)
-    //unsigned char source[6] = {'D','N','9','R','Z',' '};
-    //for (int i = 0; i < 6; i++) frame[p++] = (source[i] << 1);
-    // Das letzte Byte der Adressliste bekommt das End-Bit 0x01
-    //frame[p++] = (my_ssid << 1) | 0x61; 
     encode_ax25_call(&frame[p], g_config.bbs_callsign, 0); // Absender
     p += 7;
     
@@ -190,10 +196,6 @@ void send_aprs_beacon(int sock, const char *dest_call, const char *text) {
     frame[p++] = (target_ssid << 1) | 0x60; 
 
     // 3. ABSENDER (Deine BBS: DN9RZ-10)
-    //unsigned char source[6] = {'D','N','9','R','Z',' '};
-    //for (int i = 0; i < 6; i++) frame[p++] = (source[i] << 1);
-    // Das letzte Byte der Adressliste bekommt das End-Bit 0x01
-    //frame[p++] = (my_ssid << 1) | 0x61; 
     encode_ax25_call(&frame[p], g_config.bbs_callsign, 0); // Absender
     p += 7;
     
@@ -272,12 +274,6 @@ void send_aprs_ack_with_path(int sock, const char *sender_call, const char *msg_
     frame[p++] = (target_ssid << 1) | 0x60; 
 
     // 3. ABSENDER (Deine BBS: DN9RZ-10)
-    //unsigned char source[6] = {'D','N','9','R','Z',' '};
-    //for (int i = 0; i < 6; i++) frame[p++] = (source[i] << 1);
-    // Das letzte Byte der Adressliste bekommt das End-Bit 0x01
-    //frame[p++] = (my_ssid << 1) | 0x61; 
-
-    //encode_ax25_call(&frame[p], "DN9RZ-10", 0); // Absender
     encode_ax25_call(&frame[p], g_config.bbs_callsign, 0); // Absender
     p += 7;
 
@@ -306,7 +302,9 @@ void send_aprs_ack_with_path(int sock, const char *sender_call, const char *msg_
     frame[p++] = 0xC0; 
 
     send(sock, frame, p, 0);
-    printf("Ack (Pfad) gesendet für ID %s an %s\n", msg_id, sender_call);
+    #ifdef DEBUG
+    fprintf(stderr, "Ack (Pfad) gesendet für ID %s an %s\n", msg_id, sender_call);
+    #endif
 }
 
 void send_aprs_ack(int sock, const char *sender_call, const char *msg_id) {
@@ -333,12 +331,6 @@ void send_aprs_ack(int sock, const char *sender_call, const char *msg_id) {
 
     // 3. AX.25 Header: ABSENDER (Deine BBS: DN9RZ-10)
     // "DN9RZ" + 1 Leerzeichen = 6 Zeichen
-    //const char *my_call = "DN9RZ "; 
-    //int my_ssid = 10;
-    //for (int i = 0; i < 6; i++) frame[p++] = (my_call[i] << 1);
-    // Das letzte Byte der Adressliste bekommt das End-Bit 0x01
-    //frame[p++] = (my_ssid << 1) | 0x61; 
-
     encode_ax25_call(&frame[p], g_config.bbs_callsign, 1); // Absender
     p += 7;
 
@@ -369,7 +361,9 @@ void send_aprs_ack(int sock, const char *sender_call, const char *msg_id) {
     if (send(sock, frame, p, 0) < 0) {
         perror("Senden fehlgeschlagen");
     } else {
-        printf("Ack erfolgreich an Direwolf übergeben für: %s\n", sender_call);
+        #ifdef DEBUG
+        fprintf(stderr, "Ack erfolgreich an Direwolf übergeben für: %s\n", sender_call);
+        #endif
     }
 }
 
@@ -444,7 +438,9 @@ void add_to_queue(const char *dest_call, const char *text) {
         current->next = new_msg;
     }
 
-    printf("Nachricht zur Queue hinzugefügt: %s -> %s (ID: %s)\n", dest_call, text, msg_id);
+    #ifdef DEBUG
+    fprintf(stderr, "Nachricht zur Queue hinzugefügt: %s -> %s (ID: %s)\n", dest_call, text, msg_id);
+    #endif
 }
 
 // Funktion: Nachricht aus Queue entfernen (nach ACK)
@@ -460,7 +456,9 @@ void remove_from_queue(const char *msg_id) {
                 message_queue = current->next;
             }
             free(current);
-            printf("Nachricht mit ID %s aus Queue entfernt.\n", msg_id);
+            #ifdef DEBUG
+            fprintf(stderr, "Nachricht mit ID %s aus Queue entfernt.\n", msg_id);
+            #endif
             return;
         }
         prev = current;
@@ -480,11 +478,13 @@ void process_queue(int sock) {
                 send_aprs_message(sock, current->dest_call, current->text, current->msg_id);
                 current->sent_time = now;
                 current->retry_count++;
-                printf("Nachricht gesendet (Retry %d): %s\n", current->retry_count, current->msg_id);
+                fprintf(stderr, "Nachricht gesendet (Retry %d): %s\n", current->retry_count, current->msg_id);
                 sent_one = 1;  // Nur eine senden
             } else {
                 // Max Retries erreicht – entfernen oder loggen
-                printf("Max Retries für ID %s erreicht - entferne aus Queue.\n", current->msg_id);
+                #ifdef DEBUG
+                fprintf(stderr, "Max Retries für ID %s erreicht - entferne aus Queue.\n", current->msg_id);
+                #endif
                 remove_from_queue(current->msg_id);
                 // current ist jetzt ungültig, also neu starten
                 current = message_queue;
@@ -520,6 +520,8 @@ int main() {
     struct sockaddr_in server_addr;
     unsigned char buffer[BUF_SIZE];
 
+    char beacon_text[100];
+
 #ifdef RUN_AS_DAEMON
    if (daemon(0, 0) == -1) {
         perror("Daemonisierung fehlgeschlagen");
@@ -533,7 +535,7 @@ int main() {
     signal(SIGTERM, handle_signal);
 
     // Globale Konfiguration laden
-    printf("Lade Konfiguration...%s\n", CONFIG_PATH);
+    fprintf(stderr, "Lade Konfiguration...%s\n", CONFIG_PATH);
     if (config_load(&g_config, CONFIG_PATH) != 0) {
         fprintf(stderr, "Warnung: Konnte Konfigurationsdatei %s nicht laden, benutze Defaultwerte.\n", CONFIG_PATH);
     }
@@ -556,18 +558,20 @@ int main() {
     inet_pton(AF_INET, g_config.aprs_host, &server_addr.sin_addr);
 
     // 2. Verbindung zu Direwolf aufbauen
-    printf("Verbinde zu Direwolf an %s:%d...\n", g_config.aprs_host, KISS_PORT);
+    fprintf(stderr, "Verbinde zu Direwolf an %s:%d...\n", g_config.aprs_host, KISS_PORT);
     if (connect(sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
         perror("Verbindung fehlgeschlagen. Läuft Direwolf?");
         return 1;
     }
 
-    printf("Verbunden mit KISS an %s:%d. Warte auf Pakete...\n", g_config.aprs_host, KISS_PORT);
+    fprintf(stderr, "Verbunden mit KISS an %s:%d. Warte auf Pakete...\n", g_config.aprs_host, KISS_PORT);
 
     // send_aprs_beacon(sock, "APX220", "!5115.52N/00622.51EBTesting APRS Daemon/Linux. Msg HELP to get started.");
-    send_aprs_beacon(sock, "APX220", "!5115.52N/00622.51EBBBS telnet localhost 2323 or msg HELP");
-    last_beacon_time = time(NULL);
-
+    if (g_config.beacon_interval != 0){
+        generate_beacon_text(beacon_text, sizeof(beacon_text));
+        send_aprs_beacon(sock, APRS_DEST_CALL, beacon_text);
+        last_beacon_time = time(NULL);
+    }
     // 3. Empfangsschleife
     while (running) {
         fd_set readfds;
@@ -584,18 +588,21 @@ int main() {
             memset(buffer, 0, BUF_SIZE);
             ssize_t bytes_received = recv(sock, buffer, BUF_SIZE, 0);
             if (bytes_received <= 0) {
-                printf("Verbindung verloren.\n");
+                fprintf(stderr, "Verbindung verloren.\n");
                 break;
             }
 
             char src_call[10];
             char dst_call[10];
             decode_callsign(&buffer[9], src_call); 
-            printf("----------------------------------\n");
-            printf("Absender: %s\n", src_call);
-            
+            #ifdef DEBUG
+            fprintf(stderr, "----------------------------------\n");
+            fprintf(stderr, "Absender: %s\n", src_call);
+            #endif
             decode_callsign(&buffer[2], dst_call); 
-            printf("Empfaenger: %s\n", dst_call);
+            #ifdef DEBUG
+            fprintf(stderr, "Empfaenger: %s\n", dst_call);
+            #endif
 
             unsigned char *ax25_start = &buffer[2]; // AX.25 beginnt nach dem KISS-Header
             unsigned char *payload_ptr = find_payload(ax25_start, bytes_received);
@@ -608,9 +615,13 @@ int main() {
                 }
                 
                 // Drucke die Payload ohne binary Bytes
-                printf("Payload: %.*s\n", payload_len, payload_ptr);
+                #ifdef DEBUG
+                fprintf(stderr, "Payload: %.*s\n", payload_len, payload_ptr);
+                #endif
             } else {
-                printf("Payload: (keine gefunden)\n");
+                #ifdef DEBUG
+                fprintf(stderr, "Payload: (keine gefunden)\n");
+                #endif
             }
 
             // Prüfen, ob die Nachricht an uns gerichtet ist (DN9RZ-10)
@@ -622,7 +633,9 @@ int main() {
             int is_bulletin = (strncmp(real_dest, "BLN", 3) == 0);
 
             if (is_bulletin) {
-                printf("Bulletin erkannt: %s\n", real_dest);
+                #ifdef DEBUG
+                fprintf(stderr, "Bulletin erkannt: %s\n", real_dest);
+                #endif
                 //save_bulletin_to_db(real_dest, src_call, (char*)payload_ptr);
                 char bulletin_clean_text[256] = {0};
                 make_clean_text(payload_ptr, (char*)&bulletin_clean_text);
@@ -639,9 +652,16 @@ int main() {
             strncpy(padded_space_callsign, g_config.bbs_callsign, strlen(g_config.bbs_callsign));
             int is_message_for_me = (strcmp(real_dest, padded_space_callsign) == 0);
             if (is_message_for_me) {
-                printf("Diese Nachricht ist für mich bestimmt!\n");
+                char aprs_clean_text[256] = {0};
+                make_clean_text(payload_ptr, (char*)&aprs_clean_text);
+                db_add_aprs_message(g_db, src_call, (char*)aprs_clean_text); 
+                #ifdef DEBUG
+                fprintf(stderr, "Diese Nachricht ist für mich bestimmt!\n");
+                #endif
             } else {
-                printf("Diese Nachricht ist NICHT für mich bestimmt.\n");
+                #ifdef DEBUG
+                fprintf(stderr, "Diese Nachricht ist NICHT für mich bestimmt.\n");
+                #endif
                 goto msgloop_end; // Direkt zum Ende der Nachrichtenschleife springen, da Nachrichten, die nicht für uns sind, nicht weiter verarbeitet werden
             }
 
@@ -650,10 +670,14 @@ int main() {
             sprintf(expected_ack_prefix, ":%s :ack", g_config.bbs_callsign);  // z. B. ":DN9RZ-10 :ack"
             if (payload_ptr && strncmp((char*)payload_ptr, expected_ack_prefix, strlen(expected_ack_prefix)) == 0) {
                 char ack_id[10];
-                printf("ACK-Payload erkannt: %s\n", (char*)payload_ptr);
+                #ifdef DEBUG
+                fprintf(stderr, "ACK-Payload erkannt: %s\n", (char*)payload_ptr);
+                #endif
                 if (sscanf((char*)payload_ptr + strlen(expected_ack_prefix), "%9s", ack_id) == 1) {
                     size_t len = strlen(ack_id);
-                    printf("Roh extrahierte ACK-ID: %s\n", ack_id);
+                    #ifdef DEBUG
+                    fprintf(stderr, "Roh extrahierte ACK-ID: %s\n", ack_id);
+                    #endif
                     int i = 0;
                     while((size_t)i < len && ack_id[i] != '\0') {
                         if (ack_id[i] == '}') {
@@ -662,9 +686,13 @@ int main() {
                         }
                         i++;
                     }
-                    printf("Bereinigte ACK-ID: %s\n", ack_id);
+                    #ifdef DEBUG
+                    fprintf(stderr, "Bereinigte ACK-ID: %s\n", ack_id);
+                    #endif
                     remove_from_queue(ack_id);
-                    printf("ACK erhalten für ID: %s\n", ack_id);
+                    #ifdef DEBUG
+                    fprintf(stderr, "ACK erhalten für ID: %s\n", ack_id);
+                    #endif
                     goto msgloop_end; // Direkt zum Ende der Nachrichtenschleife springen, da ACKs nicht weiter verarbeitet werden  
                 }
             }
@@ -684,18 +712,24 @@ int main() {
             }
 
             if (is_message_for_me && msg_id_found) {
-                printf("Nachricht ist für mich und enthält eine ID: %s\n", msg_id);
-                send_aprs_ack_with_path(sock, src_call, msg_id);            
+                #ifdef DEBUG
+                fprintf(stderr, "Nachricht ist für mich und enthält eine ID: %s\n", msg_id);
+                #endif
+                send_aprs_ack_with_path(sock, src_call, msg_id);           
             
                 char task_id[20];
                 sprintf(task_id, "%s-%s", msg_id, src_call);
-                printf("Generierte Task-ID für Verarbeitung: %s\n", task_id);
+                #ifdef DEBUG
+                fprintf(stderr, "Generierte Task-ID für Verarbeitung: %s\n", task_id);
+                #endif
 
                 //int is_duplicate = 0;
                 for (int i = 0; i < 10; i++) {
                     if (strcmp(tasks[i], task_id) == 0) {
                         //is_duplicate = 1;
-                        printf("Dubletten-Task erkannt: %s - überspringe Verarbeitung.\n", task_id);
+                        #ifdef DEBUG
+                        fprintf(stderr, "Dubletten-Task erkannt: %s - überspringe Verarbeitung.\n", task_id);
+                        #endif
                         goto msgloop_end;
                     }
                 }
@@ -731,8 +765,9 @@ msgloop_end:
             last_queue_process = now;
         }
 
-        if (now - last_beacon_time >= 1200) { // Alle 20 Minuten ein Beacon senden
-            send_aprs_beacon(sock, "APX220", "!5115.52N/00622.51EBBBS telnet localhost 2323 or msg HELP");
+        // send beacon every x minutes
+        if (now - last_beacon_time >= g_config.beacon_interval && g_config.beacon_interval != 0) {
+            send_aprs_beacon(sock, APRS_DEST_CALL, beacon_text);
             last_beacon_time = now;
         }
     }
@@ -740,6 +775,4 @@ msgloop_end:
 close(sock);
 return 0;
 }
-
-
 

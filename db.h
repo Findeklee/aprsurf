@@ -19,6 +19,9 @@ void db_close(db_handle_t *db);
 // source: z.B. "telnet" oder "aprs"
 bool db_add_message(db_handle_t *db, const char *callsign, const char *msg, const char *source);
 
+// Add any aprs message sent to my callsign to db
+bool db_add_aprs_message(db_handle_t *db, const char *from_call, const char *content);
+
 // Add a login entry to lastlog (returns true on success)
 bool db_add_lastlog(db_handle_t *db, const char *callsign);
 

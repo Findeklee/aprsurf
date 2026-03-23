@@ -7,11 +7,35 @@
 #include <termios.h>
 #include <ctype.h>
 #include "db.h"
+#include <stdbool.h>
+#include "config.h"
+
+#define ESC_CHAR 27
+#define MAX_CALLSIGN_LENGTH 8
+
+static void show_intro_message(void) {
+    printf("Welcome to APRSurf BBS!\n");
+    printf("If you have an APRS-capable radio, send a message to %s with the\ntext \"HELP\" to get started.\n", g_config.bbs_callsign);
+    fflush(stdout);
+}
+
+static void show_title_file(void) {
+    const char *path = "/usr/local/share/aprsurf/aprsurf-title.txt";
+    FILE *f = fopen(path, "r");
+    if (!f) return;
+    char buf[512];
+    while (fgets(buf, sizeof(buf), f)) {
+        fputs(buf, stdout);
+    }
+    fflush(stdout);
+    fclose(f);
+}
 
 extern db_handle_t *g_db;
 
 void handle_login(Session *s, char *input) {
-    static int esc_phase = 1;
+    static bool esc_phase = true;
+    static bool title_shown = false;
     if (esc_phase) {
         // Warte auf ESC, um den Puffer zu synchronisieren
         if (strlen(input) == 0) {
@@ -21,13 +45,19 @@ void handle_login(Session *s, char *input) {
             return;
         }
         // Prüfe, ob die Eingabe exakt ein ESC-Zeichen ist
-        if (strlen(input) == 1 && (unsigned char)input[0] == 27) {
-            esc_phase = 0;
+        if (strlen(input) == 1 && (unsigned char)input[0] == ESC_CHAR) {
+            esc_phase = false;
             // Wechsel zu Canonical-Modus für callsign-Eingabe mit Echo und Backspace
             enable_canonical_mode();
             tcflush(STDIN_FILENO, TCIFLUSH);
             tcflush(STDOUT_FILENO, TCOFLUSH);
-            printf("\nPlease enter callsign: ");
+            if (!title_shown) {
+                printf("\033[2J\033[H");
+                show_title_file();
+                show_intro_message();
+                title_shown = true;
+            }
+            printf("\nPlease enter callsign (or \"n0call\" for read-only access): ");
             fflush(stdout);
             return;
         } else {
@@ -37,8 +67,12 @@ void handle_login(Session *s, char *input) {
     }
     // Wenn noch kein Rufzeichen gesetzt ist, fordere zur Eingabe auf und schalte in den Kanonischen Modus
     if (strlen(s->callsign) == 0 && strlen(input) == 0) {
-        // Prompt wurde schon oben ausgegeben
-        printf("dfgdfgd");
+        if (!title_shown) {
+            show_title_file();
+            title_shown = true;
+        }
+        printf("Please enter callsign: ");
+        fflush(stdout);
         return;
     }
     // Wenn Eingabe vorhanden, direkt übernehmen (zentral gefiltert)
@@ -49,7 +83,7 @@ void handle_login(Session *s, char *input) {
         for (char *p = s->callsign; *p; ++p) {
             *p = toupper(*p);
         }
-        // Prüfe Rufzeichen: <=8 Zeichen, muss Buchstaben und mindestens eine Zahl enthalten
+        // Prüfe Rufzeichen: <=MAX_CALLSIGN_LENGTH Zeichen, muss Buchstaben und mindestens eine Zahl enthalten
         int len = strlen(s->callsign);
         bool has_letter = false;
         bool has_digit = false;
@@ -57,9 +91,9 @@ void handle_login(Session *s, char *input) {
             if (isalpha(*p)) has_letter = true;
             if (isdigit(*p)) has_digit = true;
         }
-        if (len > 8 || !has_letter || !has_digit) {
+        if (len > MAX_CALLSIGN_LENGTH || !has_letter || !has_digit) {
             s->callsign[0] = '\0';
-            printf("Invalid callsign. Must be <=8 characters, contain letters and at least one number.\n");
+            printf("Invalid callsign. Must be <=%d characters, contain letters and at least one number.\n", MAX_CALLSIGN_LENGTH);
             printf("Please enter callsign: ");
             fflush(stdout);
             return;

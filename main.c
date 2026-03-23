@@ -112,7 +112,7 @@ void run_session_loop(void) {
             break;
         }
 
-        // \r ignorieren (Telnet sendet \r\n)
+        // \r als Fallback ignorieren (wird normalerweise schon in filter_telnet_iac zu \n normalisiert)
         if (c == '\r') continue;
 
         struct termios term;

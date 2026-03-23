@@ -5,6 +5,7 @@
 #include "termutil.h"
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 #include <unistd.h>
 #define WALL_MAX_SHOW 10
 
@@ -20,6 +21,7 @@ static int print_wall_message(const char *callsign, const char *msg, const char 
 
 
 void handle_wall(Session *s, char *input) {
+    bool is_n0call = (s->callsign[0] && strcasecmp(s->callsign, "N0CALL") == 0);
     if (strlen(input) == 0) {
         // Bildschirm löschen (ANSI ESC [2J [H)
         printf("\033[2J\033[H");
@@ -30,7 +32,11 @@ void handle_wall(Session *s, char *input) {
         }
         if (shown == 0) printf("(No messages on the wall yet)\n");
         printf("\033[0m\033[1;34m--------------------------------------------------------------------------------");
-        printf("\n\033[34m(\033[33mw\033[34m) \033[37mWrite Message        ");
+        if (!is_n0call) {
+            printf("\n\033[34m(\033[33mw\033[34m) \033[37mWrite Message        ");
+        } else {
+            printf("\n\033[34m \033[37mWrite disabled for this user ");
+        }
         printf("\033[34m(\033[33m\033[33mx\033[34m) \033[37mExit to menu\n");
         printf("> "); 
         fflush(stdout);
@@ -82,6 +88,13 @@ void handle_wall(Session *s, char *input) {
     if (strncmp(input, "x", 1) == 0 && strlen(input) == 1) {
         switch_to_menu(s);
     } else if (strncmp(input, "w", 1) == 0 && strlen(input) == 1) {
+        if (is_n0call) {
+            printf("Write disabled for %s.\n", s->callsign);
+            fflush(stdout);
+            sleep(1);
+            switch_to_wall(s);
+            return;
+        }
         s->writing_message = 1;
         enable_canonical_mode();
         printf("\033[31m\nEnter message  \033[0m\n");
@@ -89,7 +102,5 @@ void handle_wall(Session *s, char *input) {
         printf(">  ");
         fflush(stdout);
     } else if(strlen(input) > 0) {
-        //printf("Wall: %.*s\n", 200, input);
-        //printf("\nWall Menu:\n  x) Exit to menu\n  w) Write message\n> ");
     }
 }
