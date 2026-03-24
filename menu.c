@@ -43,7 +43,7 @@ void handle_menu(Session *s, char *input) {
         struct tm *local = localtime(&now);
         char time_str[20];
         strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M", local);
-        printf("\033[34m  %s | Local Time: %s | Grid: %s\n", g_config.bbs_callsign, time_str, g_config.grid_locator);
+        printf("\033[0m\033[1;34m  %s | Local Time: %s | Grid: %s\n", g_config.bbs_callsign, time_str, g_config.grid_locator);
         show_menu_ascii();
         return;
     }
@@ -56,7 +56,7 @@ void handle_menu(Session *s, char *input) {
         s->handler = handle_bbsinfo;
         s->state_changed = 1;
     } else if (strncmp(input, "s", 1) == 0 && strlen(input) == 1) {
-        s->handler = handle_userinfo;
+        s->handler = handle_bbsinfo;
         s->state_changed = 1;
     } else if (strncmp(input, "a", 1) == 0 && strlen(input) == 1) {
         s->handler = handle_aprs_monitor;

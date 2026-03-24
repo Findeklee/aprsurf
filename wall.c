@@ -16,7 +16,7 @@ static int print_wall_message(const char *callsign, const char *msg, const char 
     (void)src_call; // Unused parameter
     int *counter = (int*)userdata;
     if (*counter >= WALL_MAX_SHOW) return 1;
-    printf("\033[0;34m%.16s|%s|\033[31m%7s\033[34m  |\n`-> \033[0m%.60s\n", timestamp, source, callsign, msg);
+    printf("\033[0;34m%.16s|%s|\033[31m%7s\033[34m  \n`-> \033[0m%.60s\n", timestamp, source, callsign, msg);
     (*counter)++;
     return 0;
 }
@@ -33,13 +33,13 @@ void handle_wall(Session *s, char *input) {
         msg_pos = 0;
         msg_buf[0] = '\0';
         printf("\033[2J\033[H");
-        printf("\033[0m\033[1;34m----[\033[33mMessage Wall\033[34m]--------------------------------------------------------------\n");
+        printf("\033[0m\033[1;34m----[\033[33mMessage Wall\033[34m]-------------------------------------------------------------\n");
         int shown = 0;
         if (g_db) {
             db_get_messages(g_db, print_wall_message, &shown, WALL_MAX_SHOW, NULL);
         }
         if (shown == 0) printf("(No messages on the wall yet)\n");
-        printf("\033[0m\033[1;34m--------------------------------------------------------------------------------");
+        printf("\033[0m\033[1;34m-------------------------------------------------------------------------------");
         if (!is_n0call) {
             printf("\n\033[34m(\033[33mw\033[34m) \033[37mWrite Message        ");
         } else {

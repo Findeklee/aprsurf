@@ -13,7 +13,7 @@
 #define MAX_CALLSIGN_LENGTH 8
 
 static void show_intro_message(void) {
-    printf("Welcome to APRSurf BBS!\n");
+    printf("\nWelcome to APRSurf BBS!\n\n");
     printf("If you have an APRS-capable radio, send a message to %s with the\ntext \"HELP\" to get started.\n", g_config.bbs_callsign);
     fflush(stdout);
 }
