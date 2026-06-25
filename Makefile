@@ -1,5 +1,8 @@
 CC=gcc
 CFLAGS=-Wall -Wextra -pedantic -std=c99
+
+.PHONY: all help start clean deb compose-up compose-down compose-log
+
 all: aprsurf-bbs lastlog-viewer aprs-daemon aprsurf-msg
 
 aprsurf-bbs: $(OBJS)
@@ -28,6 +31,9 @@ help:
 	@echo "  make aprs-daemon - Baut das aprs-daemon-Programm"
 	@echo "  make clean     - Löscht Objektdateien und Binary"
 	@echo "  make start     - Startet die BBS auf Port 2323 per busybox-telnetd (empfohlen)"
+	@echo "  make compose-up   - Startet podman compose im Hintergrund"
+	@echo "  make compose-down - Stoppt podman compose und entfernt Container/Netzwerke"
+	@echo "  make compose-log  - Zeigt podman compose Logs (follow)"
 	@echo "  make deb       - Baut das Debianpaket (my-bbs_1.0-1.deb)"
 	@echo "  make help      - Zeigt diese Hilfe an"
 
@@ -43,6 +49,15 @@ lastlog-viewer: lastlog-viewer.c
 
 aprsurf-msg: aprs-msg-viewer.c config.o
 	$(CC) $(CFLAGS) -o $@ $^ -lsqlite3
+
+compose-up:
+	podman compose up -d --build
+
+compose-down:
+	podman compose down
+
+compose-log:
+	podman compose logs -f
 
 clean:
 	rm -f *.o aprsurf-bbs lastlog-viewer aprs-daemon aprsurf-msg

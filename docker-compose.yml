@@ -1,0 +1,31 @@
+services:
+  bbs:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: aprs-bbs-dev:local
+    container_name: aprs-bbs
+    command: ["/usr/local/bin/aprsurf-bbs"]
+    ports:
+      - "2323:2323"
+    volumes:
+      - ./container/aprsurf.conf:/usr/local/etc/aprsurf.conf:ro
+      - bbs_data:/var/lib
+    restart: unless-stopped
+
+  aprs-daemon:
+    image: aprs-bbs-dev:local
+    container_name: aprs-daemon
+    depends_on:
+      - bbs
+    command: ["/usr/local/bin/aprs-daemon"]
+    volumes:
+      - ./container/aprsurf.conf:/usr/local/etc/aprsurf.conf:ro
+      - bbs_data:/var/lib
+    # Linux: Zugriff auf Host-Direwolf via host.docker.internal
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+volumes:
+  bbs_data:
