@@ -7,7 +7,7 @@ all: aprsurf-bbs lastlog-viewer aprs-daemon aprsurf-msg
 
 aprsurf-bbs: $(OBJS)
 
-OBJS=main.o session.o menu.o wall.o state.o termutil.o bulletins.o bbsinfo.o userinfo.o login.o config.o db.o aprs.o 
+OBJS=main.o session.o menu.o wall.o state.o termutil.o bulletins.o bbsinfo.o aprsurfinfo.o userinfo.o login.o config.o db.o aprs.o 
 aprs.o: aprs.c aprs.h
 config.o: config.c config.h
 

@@ -9,6 +9,7 @@ services:
     ports:
       - "2323:2323"
     volumes:
+      - ./aprsurf-menu.txt:/usr/local/share/aprsurf/aprsurf-menu.txt:ro
       - ./container/aprsurf.conf:/usr/local/etc/aprsurf.conf:ro
       - bbs_data:/var/lib
     restart: unless-stopped

@@ -22,7 +22,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN mkdir -p /usr/local/bin /usr/local/etc /var/lib
 COPY --from=build /src/aprsurf-bbs /usr/local/bin/aprsurf-bbs
 COPY --from=build /src/aprs-daemon /usr/local/bin/aprs-daemon
-COPY --from=build /src/aprsurf.conf /usr/local/etc/aprsurf.conf
 
 # Laufzeit-Default: BBS
 CMD ["/usr/local/bin/aprsurf-bbs"]

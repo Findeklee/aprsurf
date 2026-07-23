@@ -11,7 +11,7 @@ static int print_bulletin(const char *dest_call, const char *sender, const char 
     (void)src_call; // Unused parameter
     int *counter = (int*)userdata;
     if (*counter >= MAX_SHOW) return 1;
-    printf("\033[0;34m%.16s|%s|\033[31m%7s\033[34m  \n`-> \033[0m%.74s\n", received_at, sender, dest_call, content);
+    printf("\033[0;34m%.16s|%s|\033[31m%7s\033[34m  \n`->\033[0m%.76s\n", received_at, sender, dest_call, content);
     (*counter)++;
     return 0;
 }

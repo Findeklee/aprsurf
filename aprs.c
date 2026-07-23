@@ -11,6 +11,7 @@
 #include <ctype.h>
 #include <termios.h>
 #include <time.h>
+#include "config.h"
 
 // Helper to trim trailing spaces from callsign
 void trim_callsign(char *call, size_t len) {
@@ -187,9 +188,12 @@ void handle_aprs_monitor(Session *s, char *input) {
     if (strlen(input) == 0) {
         // Bildschirm löschen (ANSI ESC [2J [H)
         printf("\033[2J\033[H");
+        printf("APRS Monitor\n");
         fflush(stdout);
-        const char *host = "192.168.178.39";
+        // const char *host = "192.168.178.59";
+        const char *host = g_config.aprs_host;
         int port = 8000;
+        // int port = g_config.aprs_port;
 
         int sockfd = connect_to_agwpe(host, port);
         if (sockfd < 0) {

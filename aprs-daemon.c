@@ -1,11 +1,12 @@
 /** Prototype of aprs daemon */
-// #define RUN_AS_DAEMON
+ //#define RUN_AS_DAEMON
  #define DEBUG
 
 #define _DEFAULT_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <ctype.h>
@@ -250,6 +251,48 @@ int extract_msg_id(const char *message_ptr, char *id_output) {
     }
     
     return 0;
+}
+
+/**
+ * Entkapselt APRS Third-Party Frames.
+ * Erwartetes Format:
+ * }SRC>DEST,PATH:INNER_PAYLOAD
+ * 
+ * Rückgabe:
+ *  1  = erfolgreich entkapselt
+ *  0  = kein Third-Party Frame (payload startet nicht mit '}')
+ * -1  = Third-Party erkannt, aber ungültiges Format
+ */
+int unwrap_third_party_payload(const char *payload, char *inner_src_out, size_t inner_src_out_size, const char **inner_payload_out) {
+    if (!payload || !inner_src_out || inner_src_out_size == 0 || !inner_payload_out) {
+        return -1;
+    }
+    
+    if (payload[0] != '}') {
+        return 0; // kein third-party
+    }
+    
+    const char *start = payload + 1;
+    const char *gt = strchr(start, '>');
+    const char *colon = strchr(start, ':');
+    
+    if (!gt || !colon || gt >= colon) {
+        return -1; // kaputter third-party header
+    }
+    
+    size_t src_len = (size_t)(gt - start);
+    if (src_len == 0) {
+        return -1;
+    }
+    if (src_len >= inner_src_out_size) {
+        src_len = inner_src_out_size - 1;
+    }
+    
+    memcpy(inner_src_out, start, src_len);
+    inner_src_out[src_len] = '\0';
+    
+    *inner_payload_out = colon + 1;
+    return 1;
 }
 
 void send_aprs_ack_with_path(int sock, const char *sender_call, const char *msg_id) {
@@ -622,11 +665,45 @@ int main() {
                 #ifdef DEBUG
                 fprintf(stderr, "Payload: (keine gefunden)\n");
                 #endif
+                goto msgloop_end; // Ohne Payload keine weitere Verarbeitung
+             }
+ 
+            // Effektive Datenquelle (normal oder entkapseltes Third-Party)
+            const char *effective_payload = (const char *)payload_ptr;
+            char effective_src_call[10];
+            strncpy(effective_src_call, src_call, sizeof(effective_src_call) - 1);
+            effective_src_call[sizeof(effective_src_call) - 1] = '\0';
+            
+            if (effective_payload[0] == '}') {
+                char inner_src[10] = {0};
+                const char *inner_payload = NULL;
+                int tp_rc = unwrap_third_party_payload(effective_payload, inner_src, sizeof(inner_src), &inner_payload);
+                if (tp_rc == 1) {
+                    strncpy(effective_src_call, inner_src, sizeof(effective_src_call) - 1);
+                    effective_src_call[sizeof(effective_src_call) - 1] = '\0';
+                    effective_payload = inner_payload;
+                    #ifdef DEBUG
+                    fprintf(stderr, "Third-Party entkapselt: src=%s payload=%s\n", effective_src_call, effective_payload);
+                    #endif
+                } else if (tp_rc < 0) {
+                    #ifdef DEBUG
+                    fprintf(stderr, "Ungueltiger Third-Party Frame, ueberspringe.\n");
+                    #endif
+                    goto msgloop_end;
+                }
             }
-
+            
+            // Nur APRS Message-Format ":<9 Zeichen Ziel>:Text" weiterverarbeiten
+            if (effective_payload[0] != ':') {
+                #ifdef DEBUG
+                fprintf(stderr, "Kein APRS Message-Format, ueberspringe.\n");
+                #endif
+                goto msgloop_end;
+            }
+            
             // Prüfen, ob die Nachricht an uns gerichtet ist (DN9RZ-10)
             char real_dest[10];
-            strncpy(real_dest, (char*)&payload_ptr[1], 9);
+            strncpy(real_dest, &effective_payload[1], 9);
             real_dest[9] = '\0';
 
             // Bulletin-Erkennung
@@ -638,9 +715,9 @@ int main() {
                 #endif
                 //save_bulletin_to_db(real_dest, src_call, (char*)payload_ptr);
                 char bulletin_clean_text[256] = {0};
-                make_clean_text(payload_ptr, (char*)&bulletin_clean_text);
+                make_clean_text((unsigned char *)effective_payload, (char*)&bulletin_clean_text);
                 //db_add_bulletin(g_db, real_dest, src_call, (char*)payload_ptr);
-                db_add_bulletin(g_db, real_dest, src_call, (char*)bulletin_clean_text);
+                db_add_bulletin(g_db, real_dest, effective_src_call, (char*)bulletin_clean_text);
                 // continue; // Bulletins werden nicht weiter verarbeitet
                 goto msgloop_end; // Direkt zum Ende der Nachrichtenschleife springen, da Bulletins nicht weiter verarbeitet werden 
             }
@@ -653,8 +730,8 @@ int main() {
             int is_message_for_me = (strcmp(real_dest, padded_space_callsign) == 0);
             if (is_message_for_me) {
                 char aprs_clean_text[256] = {0};
-                make_clean_text(payload_ptr, (char*)&aprs_clean_text);
-                db_add_aprs_message(g_db, src_call, (char*)aprs_clean_text); 
+                make_clean_text((unsigned char *)effective_payload, (char*)&aprs_clean_text);
+                db_add_aprs_message(g_db, effective_src_call, (char*)aprs_clean_text); 
                 #ifdef DEBUG
                 fprintf(stderr, "Diese Nachricht ist für mich bestimmt!\n");
                 #endif
@@ -668,12 +745,12 @@ int main() {
             // Prüfe, ob es ein ACK für eine ausgehende Nachricht ist
             char expected_ack_prefix[20];
             sprintf(expected_ack_prefix, ":%s :ack", g_config.bbs_callsign);  // z. B. ":DN9RZ-10 :ack"
-            if (payload_ptr && strncmp((char*)payload_ptr, expected_ack_prefix, strlen(expected_ack_prefix)) == 0) {
+            if (strncmp(effective_payload, expected_ack_prefix, strlen(expected_ack_prefix)) == 0) {
                 char ack_id[10];
                 #ifdef DEBUG
-                fprintf(stderr, "ACK-Payload erkannt: %s\n", (char*)payload_ptr);
+                fprintf(stderr, "ACK-Payload erkannt: %s\n", effective_payload);
                 #endif
-                if (sscanf((char*)payload_ptr + strlen(expected_ack_prefix), "%9s", ack_id) == 1) {
+                if (sscanf(effective_payload + strlen(expected_ack_prefix), "%9s", ack_id) == 1) {
                     size_t len = strlen(ack_id);
                     #ifdef DEBUG
                     fprintf(stderr, "Roh extrahierte ACK-ID: %s\n", ack_id);
@@ -699,11 +776,11 @@ int main() {
 
             // Message-ID extrahieren
             char msg_id[10];
-            int msg_id_found = extract_msg_id((char *)payload_ptr, msg_id);
+            int msg_id_found = extract_msg_id(effective_payload, msg_id);
 
             // Text extrahieren (wie in save_message_to_bbs)
             char clean_text[256] = {0};
-            char *text_start = strchr((char*)payload_ptr + 1, ':');
+            char *text_start = strchr((char*)effective_payload + 1, ':');
             if (text_start) {
                 text_start++; // Hinter den Doppelpunkt
                 strncpy(clean_text, text_start, sizeof(clean_text)-1);
@@ -715,10 +792,10 @@ int main() {
                 #ifdef DEBUG
                 fprintf(stderr, "Nachricht ist für mich und enthält eine ID: %s\n", msg_id);
                 #endif
-                send_aprs_ack_with_path(sock, src_call, msg_id);           
-            
+                send_aprs_ack_with_path(sock, effective_src_call, msg_id);           
+             
                 char task_id[20];
-                sprintf(task_id, "%s-%s", msg_id, src_call);
+                sprintf(task_id, "%s-%s", msg_id, effective_src_call);
                 #ifdef DEBUG
                 fprintf(stderr, "Generierte Task-ID für Verarbeitung: %s\n", task_id);
                 #endif
@@ -737,17 +814,17 @@ int main() {
                 if (task_index > 9) task_index = 0; // Einfach überschreiben, wenn voll 
                 strcpy(tasks[task_index], task_id);
                 task_index++;
-                if (strcmp(clean_text, "HELP") == 0) {
-                    add_to_queue(src_call, "Available commands: HELP, MSG <message>, WALL");
-                } else if (strcmp(clean_text, "WALL") == 0) {
-                    handle_wall_command(src_call);
+                if (strcasecmp(clean_text, "HELP") == 0) {
+                    add_to_queue(effective_src_call, "Available commands: HELP, MSG <message>, WALL");
+                } else if (strcasecmp(clean_text, "WALL") == 0) {
+                    handle_wall_command(effective_src_call);
                     last_queue_process = time(NULL)+5; // Queue in 5 Sekunden verarbeiten, damit die Antwort nicht direkt nach dem ACK kommt
-                } else if (strncmp(clean_text, "MSG ", 4) == 0) {
-                    db_add_message(g_db, src_call, clean_text + 4, "APRS");
-                    add_to_queue(src_call, "Message received and stored.");
+                } else if (strncasecmp(clean_text, "MSG ", 4) == 0) {
+                    db_add_message(g_db, effective_src_call, clean_text + 4, "APRS");
+                    add_to_queue(effective_src_call, "Message received and stored.");
                     last_queue_process = time(NULL)+5; // Queue in 5 Sekunden verarbeiten, damit die Antwort nicht direkt nach dem ACK kommt
-                } else if (strncmp (clean_text, "PING", 4) == 0) {
-                    add_to_queue(src_call, "PONG");
+                } else if (strncasecmp(clean_text, "PING", 4) == 0) {
+                    add_to_queue(effective_src_call, "PONG");
                 } else {
                 }
             }      

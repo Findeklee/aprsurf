@@ -163,6 +163,25 @@ bool db_add_bulletin(db_handle_t *db, const char *dest_call, const char *from_ca
     return rc == SQLITE_DONE;
 }
 
+static char *db_prepare_bulletin_content(sqlite3_stmt *stmt) {
+    const unsigned char *raw_content = sqlite3_column_text(stmt, 2);
+    if (!raw_content) return NULL;
+
+    int content_len = sqlite3_column_bytes(stmt, 2);
+    char *prepared_content = malloc((size_t)content_len + 1);
+    if (!prepared_content) return NULL;
+
+    memcpy(prepared_content, raw_content, (size_t)content_len);
+    prepared_content[content_len] = '\0';
+
+    if (content_len >= 11 && prepared_content[0] == ':') {
+        memmove(prepared_content, prepared_content + 11, (size_t)content_len - 11 + 1);
+    }
+
+    
+    return prepared_content;
+}
+
 int db_get_bulletins(db_handle_t *db, db_message_callback cb, void *userdata) {
     if (!db || !cb) return -1;
     const char *sql = "SELECT dest_call, sender, content, received_at FROM bulletins ORDER BY id DESC;";
@@ -173,9 +192,15 @@ int db_get_bulletins(db_handle_t *db, db_message_callback cb, void *userdata) {
     while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
         const char *dest_call = (const char *)sqlite3_column_text(stmt, 0);
         const char *sender = (const char *)sqlite3_column_text(stmt, 1);
-        const char *content = (const char *)sqlite3_column_text(stmt, 2);
+        char *content = db_prepare_bulletin_content(stmt);
         const char *received_at = (const char *)sqlite3_column_text(stmt, 3);
-        if (cb(dest_call, sender, content, received_at, userdata, NULL) != 0) break;
+
+        if (cb(dest_call, sender, content ? content : "", received_at, userdata, NULL) != 0) {
+            free(content);
+            break;
+        }
+
+        free(content);
         count++;
     }
     sqlite3_finalize(stmt);

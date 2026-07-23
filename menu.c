@@ -1,6 +1,7 @@
 #include "menu.h"
 #include "state.h"
 #include "bbsinfo.h"
+#include "aprsurfinfo.h"
 #include "userinfo.h"
 #include "config.h"
 #include "bulletins.h"
@@ -18,7 +19,7 @@ static void show_menu_ascii(void) {
         printf("=========\n");
         printf("w) Message Wall\n");
         printf("b) Read Bulletins!\n");
-        printf("i) BBS Info\n");
+        printf("i) APRSurf Info\n");
         printf("s) System Info\n");
         printf("a) APRS Monitor\n");
         printf("q) Quit\n");
@@ -53,7 +54,7 @@ void handle_menu(Session *s, char *input) {
         s->handler = handle_bulletins;
         s->state_changed = 1;
     } else if (strncmp(input, "i", 1) == 0 && strlen(input) == 1) {
-        s->handler = handle_bbsinfo;
+        s->handler = handle_aprsurfinfo;
         s->state_changed = 1;
     } else if (strncmp(input, "s", 1) == 0 && strlen(input) == 1) {
         s->handler = handle_bbsinfo;
