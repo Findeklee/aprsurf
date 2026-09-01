@@ -16,7 +16,7 @@ int main(void) {
 
     const char *sql =
         "SELECT id, from_call, content, received_at "
-        "FROM aprs_messages ORDER BY id DESC;";
+        "FROM aprs_messages ORDER BY id ASC;";
 
     sqlite3_stmt *stmt;
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {

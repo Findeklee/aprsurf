@@ -8,7 +8,7 @@ int main() {
     int rc;
 
     // Open database
-    rc = sqlite3_open("ham-bbs.sqlite3", &db);
+    rc = sqlite3_open("/var/aprsurf/aprsurf.db", &db);
     if (rc != SQLITE_OK) {
         fprintf(stderr, "Cannot open database: %s\n", sqlite3_errmsg(db));
         sqlite3_close(db);
@@ -16,7 +16,7 @@ int main() {
     }
 
     // Prepare SQL statement
-    const char *sql = "SELECT callsign, timestamp FROM lastlog ORDER BY id DESC;";
+    const char *sql = "SELECT callsign, timestamp FROM lastlog ORDER BY id ASC;";
     rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
     if (rc != SQLITE_OK) {
         fprintf(stderr, "Failed to prepare statement: %s\n", sqlite3_errmsg(db));

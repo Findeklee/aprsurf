@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <errno.h>
 #include <unistd.h>
 #include <sys/select.h>
 #include <sys/socket.h>
@@ -44,6 +45,22 @@ void write_pidfile(const char *pidfile_path) {
     }
 }
 
+static int write_all(int fd, const unsigned char *buffer, size_t length) {
+    while (length > 0) {
+        ssize_t written = write(fd, buffer, length);
+        if (written > 0) {
+            buffer += written;
+            length -= (size_t)written;
+            continue;
+        }
+        if (written < 0 && errno == EINTR) {
+            continue;
+        }
+        return -1;
+    }
+    return 0;
+}
+
 void run_relay(int client_fd, int master_fd) {
     fd_set readfds;
     unsigned char buffer[4096];
@@ -67,7 +84,10 @@ void run_relay(int client_fd, int master_fd) {
                 break;
             }
             n = filter_telnet_iac(buffer, n);
-            if (n > 0) write(master_fd, buffer, n);
+            if (n > 0 && write_all(master_fd, buffer, (size_t)n) < 0) {
+                perror("[relay] write master_fd");
+                break;
+            }
         }
 
         // PTY → Client
@@ -77,7 +97,10 @@ void run_relay(int client_fd, int master_fd) {
                 fprintf(stderr, "[relay] master_fd geschlossen\n");
                 break;
             }
-            write(client_fd, buffer, n);
+            if (write_all(client_fd, buffer, (size_t)n) < 0) {
+                perror("[relay] write client_fd");
+                break;
+            }
         }
     }
 }
@@ -153,6 +176,13 @@ int main() {
     sa.sa_flags = 0;
     sigaction(SIGINT,  &sa, NULL);
     sigaction(SIGTERM, &sa, NULL);
+
+    // Ein verlorener Client darf den Relay-Prozess nicht vor dessen
+    // Handler-Aufräumpfad beenden; write() liefert dann stattdessen EPIPE.
+    struct sigaction ignore_sigpipe = {0};
+    ignore_sigpipe.sa_handler = SIG_IGN;
+    sigemptyset(&ignore_sigpipe.sa_mask);
+    sigaction(SIGPIPE, &ignore_sigpipe, NULL);
 
     signal(SIGCHLD, SIG_IGN);  // Kindprozesse automatisch reapen, keine Zombies
 
